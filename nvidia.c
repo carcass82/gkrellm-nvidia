@@ -1,6 +1,6 @@
 /*****************************************************************************
  * GKrellM nVidia                                                            *
- * A plugin for GKrellM showing nVidia GPU info using nvidia-settings        *
+ * A plugin for GKrellM showing nVidia GPU info using libxnvctrl             *
  * Copyright (C) 2019 Carlo Casta <carlo.casta@gmail.com>                    *
  *                                                                           *
  * This program is free software; you can redistribute it and/or modify      *  
@@ -30,9 +30,9 @@
 #include <NVCtrl/NVCtrl.h>
 #include <NVCtrl/NVCtrlLib.h>
 
-static Display *display;
-
 #define GKFREQ_MAX_GPUS 4
+
+static Display *display;
 
 static GkrellmMonitor *monitor;
 static GkrellmPanel *panel;
@@ -43,8 +43,6 @@ static int system_gpu_count;
 #define GPU_CLOCK 1
 #define GPU_TEMP  2
 #define GPU_FAN   3
-
-#if 1
 
 static int get_gpu_count()
 {
@@ -63,7 +61,6 @@ static int get_gpu_count()
 	}
 
 	res = XNVCTRLQueryTargetCount(display, NV_CTRL_TARGET_TYPE_GPU, &gpu_count);
-
 	return (res == True)? gpu_count : 0;
 }
 
@@ -112,8 +109,8 @@ static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 	return 0;
 }
 
-#else /* fallback to nvidia-settings */
 
+#if 0 /* fallback to nvidia-settings, deprecated */
 static int get_gpu_count()
 {
 	int gpu_count = 0;
@@ -282,7 +279,7 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 
 static GkrellmMonitor plugin_mon =
 {
-	"nVidia",                    /* Name, for config tab.        */
+	"nvidia",                    /* Name, for config tab.        */
 	0,                           /* Id,  0 if a plugin           */
 	create_plugin,               /* The create_plugin() function */
 	update_plugin,               /* The update_plugin() function */

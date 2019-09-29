@@ -1,0 +1,12 @@
+language: cpp
+compiler: gcc
+
+addons:
+  apt:
+    packages:
+    - libxnvctrl-dev
+    - libgtk2.0-dev
+    - gkrellm
+
+script:
+    - make
