@@ -72,8 +72,9 @@ static int get_gpu_count()
 
 static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 {
-	Bool res;
+	Bool res = False;
 	int int_attribute = -1;
+	int target_count = 0;
 	
 	switch (info)
 	{
@@ -94,7 +95,9 @@ static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 		                                  NV_CTRL_GPU_CURRENT_CLOCK_FREQS,
 		                                  &int_attribute);
 
-		snprintf(buf, buf_size, "%dMHz", int_attribute >> 16);
+		if (res == True) {
+			snprintf(buf, buf_size, "%dMHz", int_attribute >> 16);
+		}
 		break;
 
 	case GPU_TEMP:
@@ -109,7 +112,9 @@ static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 		                                  NV_CTRL_GPU_CORE_TEMPERATURE,
 		                                  &int_attribute);
 
-		snprintf(buf, buf_size, "%.1fC", (float)int_attribute);
+		if (res == True) {
+			snprintf(buf, buf_size, "%.1fC", (float)int_attribute);
+		}
 		break;
 
 	case GPU_FAN:
@@ -117,14 +122,20 @@ static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 		 * NV_CTRL_THERMAL_COOLER_SPEED - Returns cooler's current operating
 		 * speed in rotations per minute (RPM).
 		 */
-		res = XNVCTRLQueryTargetAttribute(display,
-		                                  NV_CTRL_TARGET_TYPE_COOLER,
-		                                  gpu_id,
-		                                  0,
-		                                  NV_CTRL_THERMAL_COOLER_SPEED,
-		                                  &int_attribute);
+		if (XNVCTRLQueryTargetCount(display, NV_CTRL_TARGET_TYPE_COOLER, &target_count) == True &&
+		    target_count > 0) {
 
-		snprintf(buf, buf_size, "%dRPM", int_attribute);
+			res = XNVCTRLQueryTargetAttribute(display,
+			                                  NV_CTRL_TARGET_TYPE_COOLER,
+			                                  gpu_id,
+			                                  0,
+			                                  NV_CTRL_THERMAL_COOLER_SPEED,
+			                                  &int_attribute);
+		}
+
+		if (res == True) {
+			snprintf(buf, buf_size, "%dRPM", int_attribute);
+		}
 		break;
 
 	default:
@@ -157,11 +168,11 @@ static void update_plugin()
 	int w_text;
 
 	static char clock_label[] = "GPUN Clock:";
-	static char clock_string[64];
+	static char clock_string[64] = "N/A";
 	static char temp_label[] = "GPUN Temp:";
-	static char temp_string[64];
+	static char temp_string[64] = "N/A";
 	static char fan_label[] = "GPUN Fan:";
-	static char fan_string[64];
+	static char fan_string[64] = "N/A";
 
 	for (int i = 0; i < system_gpu_count; ++i) {
 
