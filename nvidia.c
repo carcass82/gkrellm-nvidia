@@ -70,16 +70,21 @@ static int get_gpu_count()
 	return (res == True)? gpu_count : 0;
 }
 
-static char* get_gpu_name(int i, char** gpu_name)
+static void get_gpu_name(int i, char** gpu_name)
 {
-	Bool res = XNVCTRLQueryTargetStringAttribute(display,
-	                                             NV_CTRL_TARGET_TYPE_GPU,
-	                                             i,
-	                                             0,
-	                                             NV_CTRL_STRING_PRODUCT_NAME,
-	                                             gpu_name);
+	Bool res;
+	static char default_name[] = "N/A";
 
-	return (res == True && gpu_name != NULL)? *gpu_name : "N/A";
+	res = XNVCTRLQueryTargetStringAttribute(display,
+	                                        NV_CTRL_TARGET_TYPE_GPU,
+	                                        i,
+	                                        0,
+	                                        NV_CTRL_STRING_PRODUCT_NAME,
+	                                        gpu_name);
+
+	if (res != True) {
+		*gpu_name = default_name;
+	}
 }
 
 static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
@@ -134,7 +139,9 @@ static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 		 * NV_CTRL_THERMAL_COOLER_SPEED - Returns cooler's current operating
 		 * speed in rotations per minute (RPM).
 		 */
-		if (XNVCTRLQueryTargetCount(display, NV_CTRL_TARGET_TYPE_COOLER, &target_count) == True &&
+		if (XNVCTRLQueryTargetCount(display,
+		                            NV_CTRL_TARGET_TYPE_COOLER,
+		                            &target_count) == True &&
 		    target_count > 0) {
 
 			res = XNVCTRLQueryTargetAttribute(display,
@@ -262,7 +269,7 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 		                                                    -1);
 
 		y = max(decal_text[idx * 8 + 0]->y, decal_text[idx * 8 + 1]->y) +
-		    max(decal_text[idx * 8 + 0]->h, decal_text[idx * 8 + 1]->h) + 2;
+		    max(decal_text[idx * 8 + 0]->h, decal_text[idx * 8 + 1]->h) + 5;
 
 		decal_text[idx * 8 + 2] = gkrellm_create_decal_text(panel,
 		                                                    "GPU8 Clock:",
@@ -338,27 +345,27 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 
 static GkrellmMonitor plugin_mon =
 {
-	"nvidia",                    /* Name, for config tab.        */
-	0,                           /* Id,  0 if a plugin           */
-	create_plugin,               /* The create_plugin() function */
-	update_plugin,               /* The update_plugin() function */
-	NULL,                        /* The create_plugin_tab() config function */
-	NULL,                        /* The apply_plugin_config() function      */
+	"nvidia",                    /* Name, for config tab.                    */
+	0,                           /* Id,  0 if a plugin                       */
+	create_plugin,               /* The create_plugin() function             */
+	update_plugin,               /* The update_plugin() function             */
+	NULL,                        /* The create_plugin_tab() config function  */
+	NULL,                        /* The apply_plugin_config() function       */
 
-	NULL,                        /* The save_plugin_config() function  */
-	NULL,                        /* The load_plugin_config() function  */
-	NULL,                        /* config keyword                     */
+	NULL,                        /* The save_plugin_config() function        */
+	NULL,                        /* The load_plugin_config() function        */
+	NULL,                        /* config keyword                           */
 
-	NULL,                        /* Undefined 2  */
-	NULL,                        /* Undefined 1  */
-	NULL,                        /* Undefined 0  */
+	NULL,                        /* Undefined 2                              */
+	NULL,                        /* Undefined 1                              */
+	NULL,                        /* Undefined 0                              */
 
 	MON_CPU | MON_INSERT_AFTER,  /* Insert plugin before this monitor.       */
 	NULL,                        /* Handle if a plugin, filled in by GKrellM */
 	NULL                         /* path if a plugin, filled in by GKrellM   */
 };
 
-GkrellmMonitor* gkrellm_init_plugin(void)
+GkrellmMonitor* gkrellm_init_plugin()
 {
 	style_id = gkrellm_add_meter_style(&plugin_mon, "nvidia");
 	monitor = &plugin_mon;
