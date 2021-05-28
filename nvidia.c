@@ -70,6 +70,18 @@ static int get_gpu_count()
 	return (res == True)? gpu_count : 0;
 }
 
+static char* get_gpu_name(int i, char** gpu_name)
+{
+	Bool res = XNVCTRLQueryTargetStringAttribute(display,
+	                                             NV_CTRL_TARGET_TYPE_GPU,
+	                                             i,
+	                                             0,
+	                                             NV_CTRL_STRING_PRODUCT_NAME,
+	                                             gpu_name);
+
+	return (res == True && gpu_name != NULL)? *gpu_name : "N/A";
+}
+
 static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 {
 	Bool res = False;
@@ -167,6 +179,7 @@ static void update_plugin()
 	int w = gkrellm_chart_width();
 	int w_text;
 
+	static char* gpu_string;
 	static char clock_label[] = "GPUN Clock:";
 	static char clock_string[64] = "N/A";
 	static char temp_label[] = "GPUN Temp:";
@@ -176,35 +189,43 @@ static void update_plugin()
 
 	for (int i = 0; i < system_gpu_count; ++i) {
 
+		get_gpu_name(i, &gpu_string);
+		w_text = gdk_string_width(
+			gdk_font_from_description(decal_text[i * 8 + 1]->text_style.font),
+			gpu_string);
+		decal_text[i * 8 + 1]->x = (w - w_text) / 2 - 1;
+
 		get_gpu_data(i, GPU_CLOCK, clock_string, 64);
 		w_text = gdk_string_width(
-			gdk_font_from_description(decal_text[i * 6 + 1]->text_style.font),
+			gdk_font_from_description(decal_text[i * 8 + 3]->text_style.font),
 			clock_string);
-		decal_text[i * 6 + 1]->x = w - m->left - m->right - w_text - 1;
+		decal_text[i * 8 + 3]->x = w - m->left - m->right - w_text - 1;
 
 		get_gpu_data(i, GPU_TEMP, temp_string, 64);
 		w_text = gdk_string_width(
-			gdk_font_from_description(decal_text[i * 6 + 3]->text_style.font),
+			gdk_font_from_description(decal_text[i * 8 + 5]->text_style.font),
 			temp_string);
-		decal_text[i * 6 + 3]->x = w - m->left - m->right - w_text - 1;
+		decal_text[i * 8 + 5]->x = w - m->left - m->right - w_text - 1;
 
 		get_gpu_data(i, GPU_FAN, fan_string, 64);
 		w_text = gdk_string_width(
-			gdk_font_from_description(decal_text[i * 6 + 5]->text_style.font),
+			gdk_font_from_description(decal_text[i * 8 + 7]->text_style.font),
 			fan_string);
-		decal_text[i * 6 + 5]->x = w - m->left - m->right - w_text - 1;
+		decal_text[i * 8 + 7]->x = w - m->left - m->right - w_text - 1;
 
 		/* replace the N in "GPUN <attribute>" string */
 		clock_label[3] = temp_label[3] = fan_label[3] = i + '0';
 
-		gkrellm_draw_decal_text(panel, decal_text[i * 6 + 0], clock_label, 0);
-		gkrellm_draw_decal_text(panel, decal_text[i * 6 + 1], clock_string, 0);
+		gkrellm_draw_decal_text(panel, decal_text[i * 8 + 1], gpu_string, 0);
 
-		gkrellm_draw_decal_text(panel, decal_text[i * 6 + 2], temp_label, 0);
-		gkrellm_draw_decal_text(panel, decal_text[i * 6 + 3], temp_string, 0);
+		gkrellm_draw_decal_text(panel, decal_text[i * 8 + 2], clock_label, 0);
+		gkrellm_draw_decal_text(panel, decal_text[i * 8 + 3], clock_string, 0);
+
+		gkrellm_draw_decal_text(panel, decal_text[i * 8 + 4], temp_label, 0);
+		gkrellm_draw_decal_text(panel, decal_text[i * 8 + 5], temp_string, 0);
 		
-		gkrellm_draw_decal_text(panel, decal_text[i * 6 + 4], fan_label, 0);
-		gkrellm_draw_decal_text(panel, decal_text[i * 6 + 5], fan_string, 0);
+		gkrellm_draw_decal_text(panel, decal_text[i * 8 + 6], fan_label, 0);
+		gkrellm_draw_decal_text(panel, decal_text[i * 8 + 7], fan_string, 0);
 	}
 
 	gkrellm_draw_panel_layers(panel);
@@ -224,7 +245,26 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 
 	for (int y = -1, idx = 0; idx < system_gpu_count; ++idx) {
 
-		decal_text[idx * 6 + 0] = gkrellm_create_decal_text(panel,
+		decal_text[idx * 8 + 0] = gkrellm_create_decal_text(panel,
+		                                                    "",
+		                                                    ts,
+		                                                    style,
+		                                                    -1,
+		                                                    y,
+		                                                    -1);
+
+		decal_text[idx * 8 + 1] = gkrellm_create_decal_text(panel,
+		                                                    "GPU NAME",
+		                                                    ts,
+		                                                    style,
+		                                                    -1,
+		                                                    y,
+		                                                    -1);
+
+		y = max(decal_text[idx * 8 + 0]->y, decal_text[idx * 8 + 1]->y) +
+		    max(decal_text[idx * 8 + 0]->h, decal_text[idx * 8 + 1]->h) + 2;
+
+		decal_text[idx * 8 + 2] = gkrellm_create_decal_text(panel,
 		                                                    "GPU8 Clock:",
 		                                                    ts,
 		                                                    style,
@@ -232,7 +272,7 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 		                                                    y,
 		                                                    -1);
 
-		decal_text[idx * 6 + 1] = gkrellm_create_decal_text(panel,
+		decal_text[idx * 8 + 3] = gkrellm_create_decal_text(panel,
 		                                                    "8888MHz",
 		                                                    ts,
 		                                                    style,
@@ -240,10 +280,10 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 		                                                    y,
 		                                                    -1);
 		
-		y = max(decal_text[idx * 6 + 0]->y, decal_text[idx * 6 + 1]->y) +
-		    max(decal_text[idx * 6 + 0]->h, decal_text[idx * 6 + 1]->h) + 1;
+		y = max(decal_text[idx * 8 + 2]->y, decal_text[idx * 8 + 3]->y) +
+		    max(decal_text[idx * 8 + 2]->h, decal_text[idx * 8 + 3]->h) + 1;
 		
-		decal_text[idx * 6 + 2] = gkrellm_create_decal_text(panel,
+		decal_text[idx * 8 + 4] = gkrellm_create_decal_text(panel,
 		                                                    "GPU8 Temp:",
 		                                                    ts,
 		                                                    style,
@@ -251,7 +291,7 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 		                                                    y,
 		                                                    -1);
 
-		decal_text[idx * 6 + 3] = gkrellm_create_decal_text(panel,
+		decal_text[idx * 8 + 5] = gkrellm_create_decal_text(panel,
 		                                                    "88.8C",
 		                                                    ts,
 		                                                    style,
@@ -259,10 +299,10 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 		                                                    y,
 		                                                    -1);
 		
-		y = max(decal_text[idx * 6 + 2]->y, decal_text[idx * 6 + 3]->y) +
-		    max(decal_text[idx * 6 + 2]->h, decal_text[idx * 6 + 3]->h) + 1;
+		y = max(decal_text[idx * 8 + 4]->y, decal_text[idx * 8 + 5]->y) +
+		    max(decal_text[idx * 8 + 4]->h, decal_text[idx * 8 + 5]->h) + 1;
 		
-		decal_text[idx * 6 + 4] = gkrellm_create_decal_text(panel,
+		decal_text[idx * 8 + 6] = gkrellm_create_decal_text(panel,
 		                                                    "GPU8 Fan:",
 		                                                    ts,
 		                                                    style,
@@ -270,7 +310,7 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 		                                                    y,
 		                                                    -1);
 
-		decal_text[idx * 6 + 5] = gkrellm_create_decal_text(panel,
+		decal_text[idx * 8 + 7] = gkrellm_create_decal_text(panel,
 		                                                    "8888RPM",
 		                                                    ts,
 		                                                    style,
@@ -278,8 +318,8 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 		                                                    y,
 		                                                    -1);
 
-		y = max(decal_text[idx * 6 + 4]->y, decal_text[idx * 6 + 5]->y) +
-		    max(decal_text[idx * 6 + 4]->h, decal_text[idx * 6 + 5]->h) + 1;
+		y = max(decal_text[idx * 8 + 6]->y, decal_text[idx * 8 + 7]->y) +
+		    max(decal_text[idx * 8 + 6]->h, decal_text[idx * 8 + 7]->h) + 1;
 
 		/* next GPU infos */
 		y += ((idx == system_gpu_count - 1)? 1 : 10);
@@ -287,11 +327,12 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 	gkrellm_panel_configure(panel, NULL, style);
 	gkrellm_panel_create(vbox, monitor, panel);
 
-	if (first_create)
+	if (first_create) {
 		g_signal_connect(G_OBJECT(panel->drawing_area),
 		                 "expose_event",
 		                 G_CALLBACK(panel_expose_event),
 		                 NULL);
+	}
 
 }
 
