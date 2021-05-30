@@ -36,7 +36,7 @@ static Display *display;
 
 static GkrellmMonitor *monitor;
 static GkrellmPanel *panel;
-static GkrellmDecal *decal_text[GKFREQ_MAX_GPUS * 6];
+static GkrellmDecal *decal_text[GKFREQ_MAX_GPUS * 8];
 static int style_id;
 static int system_gpu_count;
 
@@ -47,6 +47,11 @@ static int system_gpu_count;
 static int max(int a, int b)
 {
 	return (a > b)? a : b;
+}
+
+static int min(int a, int b)
+{
+	return (a > b)? b : a;
 }
 
 static int get_gpu_count()
@@ -67,32 +72,29 @@ static int get_gpu_count()
 
 	res = XNVCTRLQueryTargetCount(display, NV_CTRL_TARGET_TYPE_GPU, &gpu_count);
 
-	return (res == True)? gpu_count : 0;
+	return (res == True)? min(GKFREQ_MAX_GPUS, gpu_count) : 0;
 }
 
 static void get_gpu_name(int i, char** gpu_name)
 {
-	static char* gpu_string = NULL;
-	static int query_needed = 1;
+	static char *gpu_string[GKFREQ_MAX_GPUS] = { NULL };
 	Bool res;
 
-	if (query_needed == 1) {
+	if (gpu_string[i] == NULL) {
 
 		res = XNVCTRLQueryTargetStringAttribute(display,
 		                                        NV_CTRL_TARGET_TYPE_GPU,
 		                                        i,
 		                                        0,
 		                                        NV_CTRL_STRING_PRODUCT_NAME,
-		                                        &gpu_string);
+		                                        &gpu_string[i]);
 
 		if (res != True) {
-			gkrellm_dup_string(&gpu_string, "N/A");
+			gkrellm_dup_string(&gpu_string[i], "N/A");
 		}
-
-		query_needed = 0;
 	}
 
-	*gpu_name = gpu_string;
+	*gpu_name = gpu_string[i];
 }
 
 static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
