@@ -4,3 +4,5 @@ A simple [GKrellM](http://gkrellm.srcbox.net/) plugin for reading nvidia GPUs da
 Clock, Temperature and Fan Speed for multiple GPU are supported.
 
 XNVCtrl library *is required*
+
+![sample](doc/screen.jpg)
