@@ -72,19 +72,27 @@ static int get_gpu_count()
 
 static void get_gpu_name(int i, char** gpu_name)
 {
+	static char* gpu_string = NULL;
+	static int query_needed = 1;
 	Bool res;
-	static char default_name[] = "N/A";
 
-	res = XNVCTRLQueryTargetStringAttribute(display,
-	                                        NV_CTRL_TARGET_TYPE_GPU,
-	                                        i,
-	                                        0,
-	                                        NV_CTRL_STRING_PRODUCT_NAME,
-	                                        gpu_name);
+	if (query_needed == 1) {
 
-	if (res != True) {
-		*gpu_name = default_name;
+		res = XNVCTRLQueryTargetStringAttribute(display,
+		                                        NV_CTRL_TARGET_TYPE_GPU,
+		                                        i,
+		                                        0,
+		                                        NV_CTRL_STRING_PRODUCT_NAME,
+		                                        &gpu_string);
+
+		if (res != True) {
+			gkrellm_dup_string(&gpu_string, "N/A");
+		}
+
+		query_needed = 0;
 	}
+
+	*gpu_name = gpu_string;
 }
 
 static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
