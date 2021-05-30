@@ -6,3 +6,5 @@ Clock, Temperature and Fan Speed for multiple GPU are supported.
 XNVCtrl library *is required*
 
 ![sample](doc/screen.jpg)
+
+![sample multigpu](doc/screen-dualgpu.jpg)
