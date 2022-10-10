@@ -43,12 +43,12 @@ typedef int nvmlTemperatureSensors_t;
 
 nvmlReturn_t nvmlInit();
 nvmlReturn_t nvmlShutdown();
-nvmlReturn_t nvmlDeviceGetCount(unsigned int *deviceCount);
-nvmlReturn_t nvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t *device);
-nvmlReturn_t nvmlDeviceGetName(nvmlDevice_t device, char *name, unsigned int length);
-nvmlReturn_t nvmlDeviceGetClockInfo(nvmlDevice_t device, nvmlClockType_t type, unsigned int *clock);
-nvmlReturn_t nvmlDeviceGetTemperature(nvmlDevice_t device, nvmlTemperatureSensors_t sensorType, unsigned int *temp);
-nvmlReturn_t nvmlDeviceGetFanSpeed(nvmlDevice_t device, unsigned int *speed);
+nvmlReturn_t nvmlDeviceGetCount(unsigned int* deviceCount);
+nvmlReturn_t nvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t* device);
+nvmlReturn_t nvmlDeviceGetName(nvmlDevice_t device, char* name, unsigned int length);
+nvmlReturn_t nvmlDeviceGetClockInfo(nvmlDevice_t device, nvmlClockType_t type, unsigned int* clock);
+nvmlReturn_t nvmlDeviceGetTemperature(nvmlDevice_t device, nvmlTemperatureSensors_t sensorType, unsigned int* temp);
+nvmlReturn_t nvmlDeviceGetFanSpeed(nvmlDevice_t device, unsigned int* speed);
 /* minimum definitions required to link with NVML - end */
 
 
@@ -132,7 +132,7 @@ static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 		case GPU_CLOCK:
 			res = nvmlDeviceGetClockInfo(device, NVML_CLOCK_GRAPHICS, &uint_attribute);
 			if (res == NVML_SUCCESS)
-				snprintf(buf, buf_size, "%dMHz", uint_attribute);
+				snprintf(buf, buf_size, "%uMHz", uint_attribute);
 			break;
 
 		case GPU_TEMP:
