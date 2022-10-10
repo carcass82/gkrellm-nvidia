@@ -26,21 +26,10 @@
 #include <unistd.h>
 #include <X11/Xlib.h>
 #include <gkrellm2/gkrellm.h>
+#include <nvml.h>
 
-#if defined(USE_XNVCTRL)
- #include <NVCtrl/NVCtrl.h>
- #include <NVCtrl/NVCtrlLib.h>
-#elif defined(USE_NVML)
- #include <nvml.h>
-#else
- #error "No Library Selected"
-#endif
 
 #define GKFREQ_MAX_GPUS 4
-
-#if defined(USE_XNVCTRL)
-static Display *display;
-#endif
 
 static GkrellmMonitor *monitor;
 static GkrellmPanel *panel;
@@ -62,35 +51,14 @@ static int min(int a, int b)
 	return (a > b)? b : a;
 }
 
-#if defined(USE_NVML)
 static int clamp(int v, int a, int b)
 {
 	return min(max(v, a), b);
 }
-#endif
 
 static int get_gpu_count()
 {
-	Bool res;
-
-#if defined(USE_XNVCTRL)
-	int event, error, gpu_count = 0;
-
-	display = XOpenDisplay(NULL);
-
-	if (!display || XNVCTRLQueryExtension(display, &event, &error) != True) {
-
-		gkrellm_debug(G_LOG_LEVEL_ERROR, "XNVCtrl extension not present");
-
-		if (display)
-			XCloseDisplay(display);
-
-		return 0;
-	}
-
-	res = XNVCTRLQueryTargetCount(display, NV_CTRL_TARGET_TYPE_GPU, &gpu_count);
-
-#elif defined(USE_NVML)
+	nvmlReturn_t res = NVML_ERROR_UNKNOWN;
 	unsigned int gpu_count = 0;
 
 	if (nvmlInit() != NVML_SUCCESS) {
@@ -104,125 +72,33 @@ static int get_gpu_count()
 
 	res = (nvmlDeviceGetCount(&gpu_count) == NVML_SUCCESS);
 
-#endif
-
-	return (res == True)? min(GKFREQ_MAX_GPUS, gpu_count) : 0;
+	return (res == NVML_SUCCESS)? min(GKFREQ_MAX_GPUS, gpu_count) : 0;
 }
 
 static void get_gpu_name(int i, char** gpu_name)
 {
-#if defined(USE_XNVCTRL)
-
-	static char *gpu_string[GKFREQ_MAX_GPUS] = { NULL };
-
-	if (gpu_string[i] == NULL) {
-
-		if (XNVCTRLQueryTargetStringAttribute(display,
-		                                      NV_CTRL_TARGET_TYPE_GPU,
-		                                      i,
-		                                      0,
-		                                      NV_CTRL_STRING_PRODUCT_NAME,
-		                                      &gpu_string[i]) != True) {
-			gkrellm_dup_string(&gpu_string[i], "N/A");
-		}
-	}
-
-#elif defined(USE_NVML)
-
-	static char gpu_string[GKFREQ_MAX_GPUS][NVML_DEVICE_NAME_BUFFER_SIZE] = { '\0' };
+	static char gpu_string[GKFREQ_MAX_GPUS][NVML_DEVICE_NAME_BUFFER_SIZE] = {'\0'};
+	nvmlReturn_t res = NVML_ERROR_UNKNOWN;
 	nvmlDevice_t device;
 
 	if (gpu_string[i][0] == '\0') {
 
-		Bool res = (nvmlDeviceGetHandleByIndex(i, &device) == NVML_SUCCESS);
+		res = nvmlDeviceGetHandleByIndex(i, &device);
 
-		if (res == True)
-			res = res && (nvmlDeviceGetName(device, gpu_string[i], NVML_DEVICE_NAME_BUFFER_SIZE) == NVML_SUCCESS);
+		if (res == NVML_SUCCESS)
+			res = nvmlDeviceGetName(device, gpu_string[i], NVML_DEVICE_NAME_BUFFER_SIZE);
 
-		if (res != True)
+		if (res != NVML_SUCCESS)
 			strcpy(gpu_string[i], "N/A");
 
 	}
-
-#endif
 
 	*gpu_name = gpu_string[i];
 }
 
 static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 {
-	Bool res = False;
-	
-#if defined(USE_XNVCTRL)
-	int int_attribute = -1;
-	int target_count = 0;
-	
-	switch (info)
-	{
-	case GPU_CLOCK:
-		/*
-		 * NV_CTRL_GPU_CURRENT_CLOCK_FREQS - query the current GPU and memory
-		 * clocks of the graphics device driving the X screen.
-		 *
-		 * NV_CTRL_GPU_CURRENT_CLOCK_FREQS is a "packed" integer attribute;
-		 * the GPU clock is stored in the upper 16 bits of the integer, and
-		 * the memory clock is stored in the lower 16 bits of the integer.
-		 * All clock values are in MHz.  All clock values are in MHz.
-		 */
-		res = XNVCTRLQueryTargetAttribute(display,
-		                                  NV_CTRL_TARGET_TYPE_GPU,
-		                                  gpu_id,
-		                                  0,
-		                                  NV_CTRL_GPU_CURRENT_CLOCK_FREQS,
-		                                  &int_attribute);
-
-		if (res == True) {
-			snprintf(buf, buf_size, "%dMHz", int_attribute >> 16);
-		}
-		break;
-
-	case GPU_TEMP:
-		/*
-		 * NV_CTRL_GPU_CORE_TEMPERATURE reports the current core temperature
-		 * of the GPU driving the X screen.
-		 */
-		res = XNVCTRLQueryTargetAttribute(display,
-		                                  NV_CTRL_TARGET_TYPE_GPU,
-		                                  gpu_id,
-		                                  0,
-		                                  NV_CTRL_GPU_CORE_TEMPERATURE,
-		                                  &int_attribute);
-
-		if (res == True) {
-			snprintf(buf, buf_size, "%.1fC", (float)int_attribute);
-		}
-		break;
-
-	case GPU_FAN:
-		/*
-		 * NV_CTRL_THERMAL_COOLER_SPEED - Returns cooler's current operating
-		 * speed in rotations per minute (RPM).
-		 */
-		if (XNVCTRLQueryTargetCount(display,
-		                            NV_CTRL_TARGET_TYPE_COOLER,
-		                            &target_count) == True &&
-		    target_count > 0) {
-
-			res = XNVCTRLQueryTargetAttribute(display,
-			                                  NV_CTRL_TARGET_TYPE_COOLER,
-			                                  gpu_id,
-			                                  0,
-			                                  NV_CTRL_THERMAL_COOLER_SPEED,
-			                                  &int_attribute);
-		}
-
-		if (res == True) {
-			snprintf(buf, buf_size, "%dRPM", int_attribute);
-		}
-		break;
-	};
-
-#elif defined(USE_NVML)
+	nvmlReturn_t res = NVML_ERROR_UNKNOWN;
 	unsigned uint_attribute = -1;
 	nvmlDevice_t device;
 
@@ -231,29 +107,27 @@ static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 		switch (info)
 		{
 		case GPU_CLOCK:
-			res = (nvmlDeviceGetClockInfo(device, NVML_CLOCK_GRAPHICS, &uint_attribute) == NVML_SUCCESS);
-			if (res == True)
+			res = nvmlDeviceGetClockInfo(device, NVML_CLOCK_GRAPHICS, &uint_attribute);
+			if (res == NVML_SUCCESS)
 				snprintf(buf, buf_size, "%dMHz", uint_attribute);
 			break;
 
 		case GPU_TEMP:
-			res = (nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU, &uint_attribute) == NVML_SUCCESS);
-			if (res == True)
+			res = nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU, &uint_attribute);
+			if (res == NVML_SUCCESS)
 				snprintf(buf, buf_size, "%.1fC", (float)uint_attribute);
 			break;
 
 		case GPU_FAN:
-			res = (nvmlDeviceGetFanSpeed(device, &uint_attribute) == NVML_SUCCESS);
-			if (res == True)
+			res = nvmlDeviceGetFanSpeed(device, &uint_attribute);
+			if (res == NVML_SUCCESS)
 				snprintf(buf, buf_size, "%d%%", clamp(uint_attribute, 0, 100));
 			break;
 		}
 
 	}
 
-#endif
-
-	return (res == True)? 0 : -1;
+	return (res == NVML_SUCCESS)? 0 : -1;
 }
 
 static gint panel_expose_event(GtkWidget* widget, GdkEventExpose* ev)

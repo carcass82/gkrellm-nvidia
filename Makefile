@@ -1,27 +1,6 @@
-CFLAGS += -O2 -fpic -Wall `pkg-config gkrellm --cflags`
+CFLAGS += -O2 -fpic -Wall `pkg-config gkrellm --cflags` `pkg-config cuda --cflags`
 LDFLAGS += -shared
-LDLIBS  += -lX11
-
-#
-#
-#
-
-USE_XNVCTRL ?= 0
-USE_NVML    ?= 0
-
-ifeq (1,$(USE_XNVCTRL))
-	CFLAGS += -DUSE_XNVCTRL
-	LDLIBS += -lXNVCtrl
-endif
-
-ifeq (1,$(USE_NVML))
-	CFLAGS += -DUSE_NVML
-	LDLIBS += -lnvidia-ml
-endif
-
-#
-#
-#
+LDLIBS  += -lX11 -lnvidia-ml
 
 all: nvidia.so
 
