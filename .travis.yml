@@ -4,7 +4,7 @@ compiler: gcc
 addons:
   apt:
     packages:
-    - libxnvctrl-dev
+    - nvidia-cuda-dev
     - libgtk2.0-dev
     - gkrellm
 
