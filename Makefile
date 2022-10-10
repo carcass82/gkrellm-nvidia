@@ -1,4 +1,4 @@
-CFLAGS += -O2 -fpic -Wall `pkg-config gkrellm --cflags` `pkg-config cuda --cflags`
+CFLAGS += -O2 -fpic -Wall `pkg-config gkrellm --cflags`
 LDFLAGS += -shared
 LDLIBS  += -lX11 -lnvidia-ml
 

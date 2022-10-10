@@ -26,7 +26,30 @@
 #include <unistd.h>
 #include <X11/Xlib.h>
 #include <gkrellm2/gkrellm.h>
-#include <nvml.h>
+
+/* minimum definitions required to link with NVML - begin */
+#define NVML_SUCCESS 0
+#define NVML_ERROR_UNKNOWN 999
+
+#define NVML_DEVICE_NAME_BUFFER_SIZE 64
+
+#define NVML_CLOCK_GRAPHICS 0
+#define NVML_TEMPERATURE_GPU 0
+
+typedef struct nvmlDevice* nvmlDevice_t;
+typedef int nvmlReturn_t;
+typedef int nvmlClockType_t;
+typedef int nvmlTemperatureSensors_t;
+
+nvmlReturn_t nvmlInit();
+nvmlReturn_t nvmlShutdown();
+nvmlReturn_t nvmlDeviceGetCount(unsigned int *deviceCount);
+nvmlReturn_t nvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t *device);
+nvmlReturn_t nvmlDeviceGetName(nvmlDevice_t device, char *name, unsigned int length);
+nvmlReturn_t nvmlDeviceGetClockInfo(nvmlDevice_t device, nvmlClockType_t type, unsigned int *clock);
+nvmlReturn_t nvmlDeviceGetTemperature(nvmlDevice_t device, nvmlTemperatureSensors_t sensorType, unsigned int *temp);
+nvmlReturn_t nvmlDeviceGetFanSpeed(nvmlDevice_t device, unsigned int *speed);
+/* minimum definitions required to link with NVML - end */
 
 
 #define GKFREQ_MAX_GPUS 4
@@ -70,7 +93,7 @@ static int get_gpu_count()
 		return 0;
 	}
 
-	res = (nvmlDeviceGetCount(&gpu_count) == NVML_SUCCESS);
+	res = nvmlDeviceGetCount(&gpu_count);
 
 	return (res == NVML_SUCCESS)? min(GKFREQ_MAX_GPUS, gpu_count) : 0;
 }
