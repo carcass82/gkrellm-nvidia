@@ -1,10 +1,12 @@
 language: cpp
 compiler: gcc
 
+dist: jammy
+
 addons:
   apt:
     packages:
-    - libxnvctrl-dev
+    - libnvidia-ml-dev
     - libgtk2.0-dev
     - gkrellm
 
