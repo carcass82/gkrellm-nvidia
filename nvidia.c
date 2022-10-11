@@ -31,8 +31,6 @@
 #define NVML_SUCCESS 0
 #define NVML_ERROR_UNKNOWN 999
 
-#define NVML_DEVICE_NAME_BUFFER_SIZE 64
-
 #define NVML_CLOCK_GRAPHICS 0
 #define NVML_TEMPERATURE_GPU 0
 
@@ -52,17 +50,42 @@ nvmlReturn_t nvmlDeviceGetFanSpeed(nvmlDevice_t device, unsigned int* speed);
 /* minimum definitions required to link with NVML - end */
 
 
-#define GKFREQ_MAX_GPUS 4
+#define GK_PLUGIN_NAME "nvidia"
+#define GK_MAX_GPUS 4
+#define GK_CONFIG_KEYWORD "nvidia"
+#define GK_MAX_TEXT 64
 
-static GkrellmMonitor *monitor;
-static GkrellmPanel *panel;
-static GkrellmDecal *decal_text[GKFREQ_MAX_GPUS * 8];
+static GkrellmMonitor* monitor;
+static GkrellmPanel* panel;
 static int style_id;
 static int system_gpu_count;
 
-#define GPU_CLOCK 1
-#define GPU_TEMP  2
-#define GPU_FAN   3
+typedef enum _GPUProperties {
+	GPU_NAME,
+	GPU_CLOCK,
+	GPU_TEMP,
+	GPU_FAN,
+	GPU_PROPERTIES_COUNT
+} GPUProperties;
+
+typedef enum _TextAlignment { RIGHT, CENTER, LEFT } TextAlignment;
+
+typedef struct _GkrellmDecalRow {
+	GkrellmDecal* label;
+	GkrellmDecal* data;
+} GkrellmDecalRow;
+
+static GkrellmDecalRow decal_text[GK_MAX_GPUS * GPU_PROPERTIES_COUNT];
+static gboolean decal_enabled[GPU_PROPERTIES_COUNT] = { True, True, True, True };
+static TextAlignment decal_alignment[GPU_PROPERTIES_COUNT] = { CENTER, RIGHT, RIGHT, RIGHT };
+
+static char decal_labels[GPU_PROPERTIES_COUNT][GK_MAX_TEXT] = {
+	"",
+	"GPUX Clock",
+	"GPUX Temp",
+	"GPUX Fan"
+};
+
 
 static int max(int a, int b)
 {
@@ -79,44 +102,24 @@ static int clamp(int v, int a, int b)
 	return min(max(v, a), b);
 }
 
+static gboolean initialize_gpulib()
+{
+	return (nvmlInit() == NVML_SUCCESS);
+}
+
+static void shutdown_gpulib()
+{
+	nvmlShutdown();
+}
+
 static int get_gpu_count()
 {
-	nvmlReturn_t res = NVML_ERROR_UNKNOWN;
-	unsigned int gpu_count = 0;
-
-	if (nvmlInit() != NVML_SUCCESS) {
-
-		gkrellm_debug(G_LOG_LEVEL_ERROR, "NVML failed to load");
-
-		nvmlShutdown();
-
-		return 0;
-	}
+	nvmlReturn_t res;
+	unsigned int gpu_count;
 
 	res = nvmlDeviceGetCount(&gpu_count);
 
-	return (res == NVML_SUCCESS)? min(GKFREQ_MAX_GPUS, gpu_count) : 0;
-}
-
-static void get_gpu_name(int i, char** gpu_name)
-{
-	static char gpu_string[GKFREQ_MAX_GPUS][NVML_DEVICE_NAME_BUFFER_SIZE] = {'\0'};
-	nvmlReturn_t res = NVML_ERROR_UNKNOWN;
-	nvmlDevice_t device;
-
-	if (gpu_string[i][0] == '\0') {
-
-		res = nvmlDeviceGetHandleByIndex(i, &device);
-
-		if (res == NVML_SUCCESS)
-			res = nvmlDeviceGetName(device, gpu_string[i], NVML_DEVICE_NAME_BUFFER_SIZE);
-
-		if (res != NVML_SUCCESS)
-			strcpy(gpu_string[i], "N/A");
-
-	}
-
-	*gpu_name = gpu_string[i];
+	return (res == NVML_SUCCESS)? min(GK_MAX_GPUS, gpu_count) : 0;
 }
 
 static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
@@ -129,6 +132,10 @@ static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 
 		switch (info)
 		{
+		case GPU_NAME:
+			res = nvmlDeviceGetName(device, buf, buf_size);
+			break;
+
 		case GPU_CLOCK:
 			res = nvmlDeviceGetClockInfo(device, NVML_CLOCK_GRAPHICS, &uint_attribute);
 			if (res == NVML_SUCCESS)
@@ -150,6 +157,9 @@ static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 
 	}
 
+	if (res != NVML_SUCCESS)
+		strcpy(buf, "N/A");
+
 	return (res == NVML_SUCCESS)? 0 : -1;
 }
 
@@ -168,159 +178,152 @@ static gint panel_expose_event(GtkWidget* widget, GdkEventExpose* ev)
 	return 0;
 }
 
+static void panel_click_event(GtkWidget *w, GdkEventButton *event, gpointer p)
+{
+    if (event->button == 3)
+        gkrellm_open_config_window(monitor);
+}
+
 static void update_plugin()
 {
 	GkrellmStyle *style = gkrellm_panel_style(style_id);
 	GkrellmMargin *m = gkrellm_get_style_margins(style);
+	GdkFont* f = gdk_font_from_description(decal_text[0].label->text_style.font);
 	int w = gkrellm_chart_width();
-	int w_text;
+	int w_text, i, p, idx;
+	static char temp_string[GK_MAX_TEXT] = "N/A";
 
-	static char* gpu_string;
-	static char clock_label[] = "GPUN Clock:";
-	static char clock_string[64] = "N/A";
-	static char temp_label[] = "GPUN Temp:";
-	static char temp_string[64] = "N/A";
-	static char fan_label[] = "GPUN Fan:";
-	static char fan_string[64] = "N/A";
+	for (i = 0; i < system_gpu_count; ++i) {
 
-	for (int i = 0; i < system_gpu_count; ++i) {
+		idx = i * GPU_PROPERTIES_COUNT;
 
-		get_gpu_name(i, &gpu_string);
-		w_text = gdk_string_width(
-			gdk_font_from_description(decal_text[i * 8 + 1]->text_style.font),
-			gpu_string);
-		decal_text[i * 8 + 1]->x = (w - w_text) / 2 - 1;
+		for (p = 0; p < GPU_PROPERTIES_COUNT; ++p) {
 
-		get_gpu_data(i, GPU_CLOCK, clock_string, 64);
-		w_text = gdk_string_width(
-			gdk_font_from_description(decal_text[i * 8 + 3]->text_style.font),
-			clock_string);
-		decal_text[i * 8 + 3]->x = w - m->left - m->right - w_text - 1;
+			if (decal_enabled[p]) {
 
-		get_gpu_data(i, GPU_TEMP, temp_string, 64);
-		w_text = gdk_string_width(
-			gdk_font_from_description(decal_text[i * 8 + 5]->text_style.font),
-			temp_string);
-		decal_text[i * 8 + 5]->x = w - m->left - m->right - w_text - 1;
+				decal_labels[p][3] = i + '0';
+				gkrellm_draw_decal_text(panel,
+				                        decal_text[idx + p].label,
+				                        decal_labels[p],
+				                        0);
 
-		get_gpu_data(i, GPU_FAN, fan_string, 64);
-		w_text = gdk_string_width(
-			gdk_font_from_description(decal_text[i * 8 + 7]->text_style.font),
-			fan_string);
-		decal_text[i * 8 + 7]->x = w - m->left - m->right - w_text - 1;
+				get_gpu_data(i, p, temp_string, GK_MAX_TEXT);
+				w_text = gdk_string_width(f, temp_string);
 
-		/* replace the N in "GPUN <attribute>" string */
-		clock_label[3] = temp_label[3] = fan_label[3] = i + '0';
+				switch (decal_alignment[p]) {
+				case LEFT:
+					decal_text[idx + p].data->x = m->left;
+					break;
+				case CENTER:
+					decal_text[idx + p].data->x = (w - w_text) / 2 - 1;
+					break;
+				case RIGHT:
+					decal_text[idx + p].data->x = w -
+					                              m->left -
+					                              m->right -
+					                              w_text -
+												  1;
+					break;
+				}
 
-		gkrellm_draw_decal_text(panel, decal_text[i * 8 + 1], gpu_string, 0);
+				gkrellm_draw_decal_text(panel,
+				                        decal_text[idx + p].data,
+				                        temp_string,
+				                        0);
+			}
 
-		gkrellm_draw_decal_text(panel, decal_text[i * 8 + 2], clock_label, 0);
-		gkrellm_draw_decal_text(panel, decal_text[i * 8 + 3], clock_string, 0);
-
-		gkrellm_draw_decal_text(panel, decal_text[i * 8 + 4], temp_label, 0);
-		gkrellm_draw_decal_text(panel, decal_text[i * 8 + 5], temp_string, 0);
-		
-		gkrellm_draw_decal_text(panel, decal_text[i * 8 + 6], fan_label, 0);
-		gkrellm_draw_decal_text(panel, decal_text[i * 8 + 7], fan_string, 0);
+		}
 	}
 
 	gkrellm_draw_panel_layers(panel);
 }
 
+static int
+create_decal_row(int i, GPUProperties off, gchar* label, gchar* text, int y)
+{
+	GkrellmStyle *style = gkrellm_meter_style(style_id);
+	GkrellmTextstyle *ts = gkrellm_meter_textstyle(style_id);
+	int idx = i * GPU_PROPERTIES_COUNT + off;
+
+	decal_text[idx].label = gkrellm_create_decal_text(panel,
+	                                                  label,
+	                                                  ts,
+	                                                  style,
+	                                                  -1,
+	                                                  y,
+	                                                  -1);
+	
+	decal_text[idx].data = gkrellm_create_decal_text(panel,
+	                                                 text,
+	                                                 ts,
+	                                                 style,
+	                                                 -1,
+	                                                 y,
+	                                                 -1);
+
+	return max(decal_text[idx].label->y, decal_text[idx].data->y) +
+	       max(decal_text[idx].label->h, decal_text[idx].data->h);
+}
+
+static void empty_panel()
+{
+	gkrellm_destroy_decal_list(panel);
+}
+
+static void populate_panel()
+{
+	int i, y;
+	GkrellmStyle *style = gkrellm_meter_style(style_id);
+
+	for (y = -1, i = 0; i < system_gpu_count; ++i) {
+
+		y = create_decal_row(i, GPU_NAME, "", "GPU_NAME", y);
+		y += 5;
+
+		if (decal_enabled[GPU_CLOCK]) {
+			y = create_decal_row(i, GPU_CLOCK, "GPU8 Clock:", "8888MHz", y);
+			y += 1;
+		}
+
+		if (decal_enabled[GPU_TEMP]) {
+			y = create_decal_row(i, GPU_TEMP, "GPU8 Temp:", "88.8C", y);
+			y += 1;
+		}
+
+		if (decal_enabled[GPU_FAN]) {
+			y = create_decal_row(i, GPU_FAN, "GPU8 Fan:", "888%", y);
+			y += 1;
+		}
+
+		y += ((i == system_gpu_count - 1)? 1 : 10);
+	}
+
+	gkrellm_panel_configure(panel, NULL, style);
+}
+
 static void create_plugin(GtkWidget* vbox, gint first_create)
 {
-	GkrellmStyle *style;
-	GkrellmTextstyle *ts;
-
-	if (first_create)
+	if (first_create) {
 		panel = gkrellm_panel_new0();
-	style = gkrellm_meter_style(style_id);
-	ts = gkrellm_meter_textstyle(style_id);
 
-	system_gpu_count = get_gpu_count();
+		gkrellm_disable_plugin_connect(monitor, shutdown_gpulib);
 
-	for (int y = -1, idx = 0; idx < system_gpu_count; ++idx) {
+		if (initialize_gpulib() != True) {
+			gkrellm_debug(G_LOG_LEVEL_ERROR, "NVML failed to load");
+			shutdown_gpulib();	
+			return;
+		}
 
-		decal_text[idx * 8 + 0] = gkrellm_create_decal_text(panel,
-		                                                    "",
-		                                                    ts,
-		                                                    style,
-		                                                    -1,
-		                                                    y,
-		                                                    -1);
+		system_gpu_count = get_gpu_count();
+	
+	} else {
 
-		decal_text[idx * 8 + 1] = gkrellm_create_decal_text(panel,
-		                                                    "GPU NAME",
-		                                                    ts,
-		                                                    style,
-		                                                    -1,
-		                                                    y,
-		                                                    -1);
-
-		y = max(decal_text[idx * 8 + 0]->y, decal_text[idx * 8 + 1]->y) +
-		    max(decal_text[idx * 8 + 0]->h, decal_text[idx * 8 + 1]->h) + 5;
-
-		decal_text[idx * 8 + 2] = gkrellm_create_decal_text(panel,
-		                                                    "GPU8 Clock:",
-		                                                    ts,
-		                                                    style,
-		                                                    -1,
-		                                                    y,
-		                                                    -1);
-
-		decal_text[idx * 8 + 3] = gkrellm_create_decal_text(panel,
-		                                                    "8888MHz",
-		                                                    ts,
-		                                                    style,
-		                                                    -1,
-		                                                    y,
-		                                                    -1);
-		
-		y = max(decal_text[idx * 8 + 2]->y, decal_text[idx * 8 + 3]->y) +
-		    max(decal_text[idx * 8 + 2]->h, decal_text[idx * 8 + 3]->h) + 1;
-		
-		decal_text[idx * 8 + 4] = gkrellm_create_decal_text(panel,
-		                                                    "GPU8 Temp:",
-		                                                    ts,
-		                                                    style,
-		                                                    -1,
-		                                                    y,
-		                                                    -1);
-
-		decal_text[idx * 8 + 5] = gkrellm_create_decal_text(panel,
-		                                                    "88.8C",
-		                                                    ts,
-		                                                    style,
-		                                                    -1,
-		                                                    y,
-		                                                    -1);
-		
-		y = max(decal_text[idx * 8 + 4]->y, decal_text[idx * 8 + 5]->y) +
-		    max(decal_text[idx * 8 + 4]->h, decal_text[idx * 8 + 5]->h) + 1;
-		
-		decal_text[idx * 8 + 6] = gkrellm_create_decal_text(panel,
-		                                                    "GPU8 Fan:",
-		                                                    ts,
-		                                                    style,
-		                                                    -1,
-		                                                    y,
-		                                                    -1);
-
-		decal_text[idx * 8 + 7] = gkrellm_create_decal_text(panel,
-		                                                    "8888RPM",
-		                                                    ts,
-		                                                    style,
-		                                                    -1,
-		                                                    y,
-		                                                    -1);
-
-		y = max(decal_text[idx * 8 + 6]->y, decal_text[idx * 8 + 7]->y) +
-		    max(decal_text[idx * 8 + 6]->h, decal_text[idx * 8 + 7]->h) + 1;
-
-		/* next GPU infos */
-		y += ((idx == system_gpu_count - 1)? 1 : 10);
+		empty_panel();
+	
 	}
-	gkrellm_panel_configure(panel, NULL, style);
+
+	populate_panel();
+	
 	gkrellm_panel_create(vbox, monitor, panel);
 
 	if (first_create) {
@@ -328,22 +331,76 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 		                 "expose_event",
 		                 G_CALLBACK(panel_expose_event),
 		                 NULL);
+		
+		g_signal_connect(G_OBJECT(panel->drawing_area),
+		                 "button_press_event",
+		                 G_CALLBACK(panel_click_event),
+		                 NULL);
 	}
+}
 
+static void cb_toggle(GtkWidget* button, gpointer data)
+{
+	if (data != NULL)
+		*(int*)data = GTK_TOGGLE_BUTTON(button)->active;
+
+	empty_panel();
+	populate_panel();
+}
+
+static void create_plugin_tab(GtkWidget* tab_vbox)
+{
+	GtkWidget *tabs, *vbox;
+	
+	tabs = gtk_notebook_new();
+    gtk_notebook_set_tab_pos(GTK_NOTEBOOK(tabs), GTK_POS_TOP);
+    gtk_box_pack_start(GTK_BOX(tab_vbox), tabs, TRUE, TRUE, 0);
+
+	vbox = gkrellm_gtk_framed_notebook_page(tabs, _("Options"));
+	
+	gkrellm_gtk_check_button_connected(vbox,
+	                                   NULL,
+	                                   decal_enabled[GPU_CLOCK],
+	                                   False,
+	                                   False,
+	                                   0,
+	                                   cb_toggle,
+	                                   &decal_enabled[GPU_CLOCK],
+	                                   _("Show GPU Clock"));
+	
+	gkrellm_gtk_check_button_connected(vbox,
+	                                   NULL,
+	                                   decal_enabled[GPU_TEMP],
+	                                   False,
+	                                   False,
+	                                   0,
+	                                   cb_toggle,
+	                                   &decal_enabled[GPU_TEMP],
+	                                   _("Show GPU Temperature"));
+	
+	gkrellm_gtk_check_button_connected(vbox,
+	                                   NULL,
+	                                   decal_enabled[GPU_FAN],
+	                                   False,
+	                                   False,
+	                                   0,
+	                                   cb_toggle,
+	                                   &decal_enabled[GPU_FAN],
+	                                   _("Show GPU Fan Speed (if supported)"));
 }
 
 static GkrellmMonitor plugin_mon =
 {
-	"nvidia",                    /* Name, for config tab.                    */
-	0,                           /* Id,  0 if a plugin                       */
+	GK_PLUGIN_NAME,              /* Name, for config tab.                    */
+	0,                           /* Id, 0 if a plugin                        */
 	create_plugin,               /* The create_plugin() function             */
 	update_plugin,               /* The update_plugin() function             */
-	NULL,                        /* The create_plugin_tab() config function  */
+	create_plugin_tab,           /* The create_plugin_tab() config function  */
 	NULL,                        /* The apply_plugin_config() function       */
 
 	NULL,                        /* The save_plugin_config() function        */
 	NULL,                        /* The load_plugin_config() function        */
-	NULL,                        /* config keyword                           */
+	GK_CONFIG_KEYWORD,           /* config keyword                           */
 
 	NULL,                        /* Undefined 2                              */
 	NULL,                        /* Undefined 1                              */
@@ -356,7 +413,7 @@ static GkrellmMonitor plugin_mon =
 
 GkrellmMonitor* gkrellm_init_plugin()
 {
-	style_id = gkrellm_add_meter_style(&plugin_mon, "nvidia");
+	style_id = gkrellm_add_meter_style(&plugin_mon, GK_PLUGIN_NAME);
 	monitor = &plugin_mon;
 
 	return monitor;
