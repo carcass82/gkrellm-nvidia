@@ -6,7 +6,6 @@ dist: jammy
 addons:
   apt:
     packages:
-    - libnvidia-ml-dev
     - libgtk2.0-dev
     - gkrellm
 
