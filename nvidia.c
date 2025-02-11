@@ -1,7 +1,7 @@
 /*****************************************************************************
  * GKrellM nVidia                                                            *
- * A plugin for GKrellM showing nVidia GPU info using libxnvctrl             *
- * Copyright (C) 2019 Carlo Casta <carlo.casta@gmail.com>                    *
+ * A plugin for GKrellM showing nVidia GPU info using libNVML                *
+ * Copyright (C) 2025 Carlo Casta <carlo.casta@gmail.com>                    *
  *                                                                           *
  * This program is free software; you can redistribute it and/or modify      *  
  * it under the terms of the GNU General Public License as published by      *
@@ -24,10 +24,14 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <unistd.h>
-#include <X11/Xlib.h>
+#include <dlfcn.h>
 #include <gkrellm2/gkrellm.h>
 
-/* minimum definitions required to link with NVML - begin */
+#ifndef GKFREQ_NVML_SONAME
+ #define GKFREQ_NVML_SONAME "libnvidia-ml.so"
+#endif
+
+/* interface with NVML - begin */
 #define NVML_SUCCESS 0
 #define NVML_ERROR_UNKNOWN 999
 
@@ -39,16 +43,26 @@ typedef int nvmlReturn_t;
 typedef int nvmlClockType_t;
 typedef int nvmlTemperatureSensors_t;
 
-nvmlReturn_t nvmlInit();
-nvmlReturn_t nvmlShutdown();
-nvmlReturn_t nvmlDeviceGetCount(unsigned int* deviceCount);
-nvmlReturn_t nvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t* device);
-nvmlReturn_t nvmlDeviceGetName(nvmlDevice_t device, char* name, unsigned int length);
-nvmlReturn_t nvmlDeviceGetClockInfo(nvmlDevice_t device, nvmlClockType_t type, unsigned int* clock);
-nvmlReturn_t nvmlDeviceGetTemperature(nvmlDevice_t device, nvmlTemperatureSensors_t sensorType, unsigned int* temp);
-nvmlReturn_t nvmlDeviceGetFanSpeed(nvmlDevice_t device, unsigned int* speed);
-/* minimum definitions required to link with NVML - end */
+typedef nvmlReturn_t (*nvmlInit_fn)(void);
+typedef nvmlReturn_t (*nvmlShutdown_fn)(void);
+typedef nvmlReturn_t (*nvmlDeviceGetCount_fn)(unsigned int* /* deviceCount */);
+typedef nvmlReturn_t (*nvmlDeviceGetHandleByIndex_fn)(unsigned int /* index */, nvmlDevice_t* /* device */);
+typedef nvmlReturn_t (*nvmlDeviceGetName_fn)(nvmlDevice_t /* device */, char* /* name */, unsigned int /* length */);
+typedef nvmlReturn_t (*nvmlDeviceGetClockInfo_fn)(nvmlDevice_t /* device */, nvmlClockType_t /* type */, unsigned int* /* clock */);
+typedef nvmlReturn_t (*nvmlDeviceGetTemperature_fn)(nvmlDevice_t /* device */, nvmlTemperatureSensors_t /* sensorType */, unsigned int* /* temp */);
+typedef nvmlReturn_t (*nvmlDeviceGetFanSpeed_fn)(nvmlDevice_t /* device */, unsigned int* /* speed */);
 
+nvmlInit_fn nvmlInit = NULL;
+nvmlShutdown_fn nvmlShutdown = NULL;
+nvmlDeviceGetCount_fn nvmlDeviceGetCount = NULL;
+nvmlDeviceGetHandleByIndex_fn nvmlDeviceGetHandleByIndex = NULL;
+nvmlDeviceGetName_fn nvmlDeviceGetName = NULL;
+nvmlDeviceGetClockInfo_fn nvmlDeviceGetClockInfo = NULL;
+nvmlDeviceGetTemperature_fn nvmlDeviceGetTemperature = NULL;
+nvmlDeviceGetFanSpeed_fn nvmlDeviceGetFanSpeed = NULL;
+
+static void *nvml_handle = NULL;
+/* interface with NVML - end */
 
 #define GK_PLUGIN_NAME "nvidia"
 #define GK_MAX_GPUS 4
@@ -60,7 +74,9 @@ static GkrellmPanel* panel;
 static int style_id;
 static int system_gpu_count;
 
-typedef enum _GPUProperties {
+enum bool_t { False, True };
+
+typedef enum GPUProperties_t {
 	GPU_NAME,
 	GPU_CLOCK,
 	GPU_TEMP,
@@ -68,7 +84,11 @@ typedef enum _GPUProperties {
 	GPU_PROPERTIES_COUNT
 } GPUProperties;
 
-typedef enum _TextAlignment { RIGHT, CENTER, LEFT } TextAlignment;
+typedef enum TextAlignment_t {
+	RIGHT,
+	CENTER,
+	LEFT
+} TextAlignment;
 
 typedef struct _GkrellmDecalRow {
 	GkrellmDecal* label;
@@ -76,7 +96,9 @@ typedef struct _GkrellmDecalRow {
 } GkrellmDecalRow;
 
 static GkrellmDecalRow decal_text[GK_MAX_GPUS * GPU_PROPERTIES_COUNT];
+
 static gboolean decal_enabled[GPU_PROPERTIES_COUNT] = { True, True, True, True };
+
 static TextAlignment decal_alignment[GPU_PROPERTIES_COUNT] = { CENTER, RIGHT, RIGHT, RIGHT };
 
 static char decal_labels[GPU_PROPERTIES_COUNT][GK_MAX_TEXT] = {
@@ -102,17 +124,36 @@ static int clamp(int v, int a, int b)
 	return min(max(v, a), b);
 }
 
-static gboolean initialize_gpulib()
+static gboolean initialize_gpulib(void)
 {
-	return (nvmlInit() == NVML_SUCCESS);
+	nvml_handle = dlopen(GKFREQ_NVML_SONAME, RTLD_LAZY);
+	if (nvml_handle)
+	{
+		nvmlInit = (nvmlInit_fn)dlsym(nvml_handle, "nvmlInit");
+		nvmlShutdown = (nvmlShutdown_fn)dlsym(nvml_handle, "nvmlShutdown");
+		nvmlDeviceGetCount = (nvmlDeviceGetCount_fn)dlsym(nvml_handle, "nvmlDeviceGetCount");
+		nvmlDeviceGetHandleByIndex = (nvmlDeviceGetHandleByIndex_fn)dlsym(nvml_handle, "nvmlDeviceGetHandleByIndex");
+		nvmlDeviceGetName = (nvmlDeviceGetName_fn)dlsym(nvml_handle, "nvmlDeviceGetName");
+		nvmlDeviceGetClockInfo = (nvmlDeviceGetClockInfo_fn)dlsym(nvml_handle, "nvmlDeviceGetClockInfo");
+		nvmlDeviceGetTemperature = (nvmlDeviceGetTemperature_fn)dlsym(nvml_handle, "nvmlDeviceGetTemperature");
+		nvmlDeviceGetFanSpeed = (nvmlDeviceGetFanSpeed_fn)dlsym(nvml_handle, "nvmlDeviceGetFanSpeed");
+	}
+
+	return (nvml_handle && (dlerror() == NULL) && (nvmlInit() == NVML_SUCCESS));
 }
 
-static void shutdown_gpulib()
+static void shutdown_gpulib(void)
 {
-	nvmlShutdown();
+	if (nvml_handle)
+	{
+		if (nvmlShutdown)
+			nvmlShutdown();
+		
+		dlclose(nvml_handle);
+	}
 }
 
-static int get_gpu_count()
+static int get_gpu_count(void)
 {
 	nvmlReturn_t res;
 	unsigned int gpu_count;
@@ -184,8 +225,11 @@ static void panel_click_event(GtkWidget *w, GdkEventButton *event, gpointer p)
         gkrellm_open_config_window(monitor);
 }
 
-static void update_plugin()
+static void update_plugin(void)
 {
+	if (system_gpu_count == 0)
+		return;
+
 	GkrellmStyle *style = gkrellm_panel_style(style_id);
 	GkrellmMargin *m = gkrellm_get_style_margins(style);
 	GdkFont* f = gdk_font_from_description(decal_text[0].label->text_style.font);
@@ -265,12 +309,12 @@ create_decal_row(int i, GPUProperties off, gchar* label, gchar* text, int y)
 	       max(decal_text[idx].label->h, decal_text[idx].data->h);
 }
 
-static void empty_panel()
+static void empty_panel(void)
 {
 	gkrellm_destroy_decal_list(panel);
 }
 
-static void populate_panel()
+static void populate_panel(void)
 {
 	int i, y;
 	GkrellmStyle *style = gkrellm_meter_style(style_id);
@@ -411,7 +455,7 @@ static GkrellmMonitor plugin_mon =
 	NULL                         /* path if a plugin, filled in by GKrellM   */
 };
 
-GkrellmMonitor* gkrellm_init_plugin()
+GkrellmMonitor* gkrellm_init_plugin(void)
 {
 	style_id = gkrellm_add_meter_style(&plugin_mon, GK_PLUGIN_NAME);
 	monitor = &plugin_mon;

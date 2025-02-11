@@ -1,24 +1,34 @@
 CFLAGS += -O2 -fpic -Wall `pkg-config gkrellm --cflags`
 LDFLAGS += -shared
-LDLIBS  += -lX11 -lnvidia-ml
+SOURCE = nvidia.c
+OBJECT = $(SOURCE:.c=.o)
+TARGET = $(SOURCE:.c=.so)
 
-all: nvidia.so
+GKRELLM = $(shell which gkrellm)
+INSTALL_DIR = /usr/lib/gkrellm2/plugins
+LOCALINSTALL_DIR = $(HOME)/.gkrellm2/plugins
 
-nvidia.o: nvidia.c
-	$(CC) $(CFLAGS) -c nvidia.c
 
-nvidia.so: nvidia.o
-	$(CC) $(LDFLAGS) $(LDLIBS) -o nvidia.so nvidia.o
+all: $(TARGET)
+
+$(TARGET): $(OBJECT)
+	$(CC) $(LDFLAGS) -o $@ $<
+
+.c.o:
+	$(CC) -c $(CFLAGS) -o $@ $<
+
+.PHONY: install install-local clean test
 
 install:
-	install -m755 nvidia.so ~/.gkrellm2/plugins/
+	install -m755 $(TARGET) $(DESTDIR)$(INSTALL_DIR)
+
+install-local:
+	install -m755 $(TARGET) $(DESTDIR)$(LOCALINSTALL_DIR)
 
 clean:
-	rm -rf *.o *.so
+	rm -rf $(OBJECT) $(TARGET)
 
 # start gkrellm in plugin-test mode
-# (make sure gkrellm executable is in PATH)
-test: nvidia.so
-	`which gkrellm` -p nvidia.so
-
-.PHONY: install clean
+# (needs gkrellm executable in PATH)
+test: $(TARGET)
+	$(GKRELLM) -p $<
