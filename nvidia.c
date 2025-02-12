@@ -69,10 +69,10 @@ static void *nvml_handle = NULL;
 #define GK_CONFIG_KEYWORD "nvidia"
 #define GK_MAX_TEXT 64
 
-static GkrellmMonitor* monitor;
-static GkrellmPanel* panel;
-static int style_id;
-static int system_gpu_count;
+static GkrellmMonitor* monitor = NULL;
+static GkrellmPanel* panel = NULL;
+static int style_id = 0;
+static int system_gpu_count = 0;
 
 enum bool_t { False, True };
 
@@ -108,6 +108,7 @@ static char decal_labels[GPU_PROPERTIES_COUNT][GK_MAX_TEXT] = {
 	"GPUX Fan"
 };
 
+#define UNUSED(x) (void)(x)
 
 static int max(int a, int b)
 {
@@ -221,6 +222,9 @@ static gint panel_expose_event(GtkWidget* widget, GdkEventExpose* ev)
 
 static void panel_click_event(GtkWidget *w, GdkEventButton *event, gpointer p)
 {
+	UNUSED(w);
+	UNUSED(p);
+
     if (event->button == 3)
         gkrellm_open_config_window(monitor);
 }

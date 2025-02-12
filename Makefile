@@ -1,4 +1,4 @@
-CFLAGS += -O2 -fpic -Wall `pkg-config gkrellm --cflags`
+CFLAGS += -O2 -fpic -Wall -Wextra `pkg-config gkrellm --cflags`
 LDFLAGS += -shared
 SOURCE = nvidia.c
 OBJECT = $(SOURCE:.c=.o)
