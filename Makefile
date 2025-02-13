@@ -1,5 +1,7 @@
 CFLAGS += -O2 -fpic -Wall -Wextra `pkg-config gkrellm --cflags`
 LDFLAGS += -shared
+INSTALLFLAGS = -m755 -s
+
 SOURCE = nvidia.c
 OBJECT = $(SOURCE:.c=.o)
 TARGET = $(SOURCE:.c=.so)
@@ -19,11 +21,13 @@ $(TARGET): $(OBJECT)
 
 .PHONY: install install-local clean test
 
-install:
-	install -m755 $(TARGET) $(DESTDIR)$(INSTALL_DIR)
+install: $(TARGET)
+	install -d $(DESTDIR)$(INSTALL_DIR)
+	install $(INSTALLFLAGS) $(TARGET) $(DESTDIR)$(INSTALL_DIR)
 
-install-local:
-	install -m755 $(TARGET) $(DESTDIR)$(LOCALINSTALL_DIR)
+install-local: $(TARGET)
+	install -d $(DESTDIR)$(LOCALINSTALL_DIR)
+	install $(INSTALLFLAGS) $(TARGET) $(DESTDIR)$(LOCALINSTALL_DIR)
 
 clean:
 	rm -rf $(OBJECT) $(TARGET)
