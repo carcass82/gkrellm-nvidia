@@ -18,15 +18,10 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA *
  *                                                                           *
  *****************************************************************************/
-
-#include <stdio.h>
-#include <sys/time.h>
-#include <sys/stat.h>
-#include <string.h>
-#include <unistd.h>
-#include <dlfcn.h>
 #include <gkrellm2/gkrellm.h>
+#include <dlfcn.h>
 
+/* default libNVML file name */
 #ifndef GKFREQ_NVML_SONAME
  #define GKFREQ_NVML_SONAME "libnvidia-ml.so"
 #endif
@@ -38,19 +33,19 @@
 #define NVML_CLOCK_GRAPHICS 0
 #define NVML_TEMPERATURE_GPU 0
 
-typedef struct nvmlDevice* nvmlDevice_t;
+typedef void* nvmlDevice_t;
 typedef int nvmlReturn_t;
 typedef int nvmlClockType_t;
 typedef int nvmlTemperatureSensors_t;
 
 typedef nvmlReturn_t (*nvmlInit_fn)(void);
 typedef nvmlReturn_t (*nvmlShutdown_fn)(void);
-typedef nvmlReturn_t (*nvmlDeviceGetCount_fn)(unsigned int* /* deviceCount */);
-typedef nvmlReturn_t (*nvmlDeviceGetHandleByIndex_fn)(unsigned int /* index */, nvmlDevice_t* /* device */);
-typedef nvmlReturn_t (*nvmlDeviceGetName_fn)(nvmlDevice_t /* device */, char* /* name */, unsigned int /* length */);
-typedef nvmlReturn_t (*nvmlDeviceGetClockInfo_fn)(nvmlDevice_t /* device */, nvmlClockType_t /* type */, unsigned int* /* clock */);
-typedef nvmlReturn_t (*nvmlDeviceGetTemperature_fn)(nvmlDevice_t /* device */, nvmlTemperatureSensors_t /* sensorType */, unsigned int* /* temp */);
-typedef nvmlReturn_t (*nvmlDeviceGetFanSpeed_fn)(nvmlDevice_t /* device */, unsigned int* /* speed */);
+typedef nvmlReturn_t (*nvmlDeviceGetCount_fn)(guint*);
+typedef nvmlReturn_t (*nvmlDeviceGetHandleByIndex_fn)(guint, nvmlDevice_t*);
+typedef nvmlReturn_t (*nvmlDeviceGetName_fn)(nvmlDevice_t, char*, guint);
+typedef nvmlReturn_t (*nvmlDeviceGetClockInfo_fn)(nvmlDevice_t, nvmlClockType_t, guint*);
+typedef nvmlReturn_t (*nvmlDeviceGetTemperature_fn)(nvmlDevice_t, nvmlTemperatureSensors_t, guint*);
+typedef nvmlReturn_t (*nvmlDeviceGetFanSpeed_fn)(nvmlDevice_t, guint*);
 
 nvmlInit_fn nvmlInit = NULL;
 nvmlShutdown_fn nvmlShutdown = NULL;
@@ -60,8 +55,6 @@ nvmlDeviceGetName_fn nvmlDeviceGetName = NULL;
 nvmlDeviceGetClockInfo_fn nvmlDeviceGetClockInfo = NULL;
 nvmlDeviceGetTemperature_fn nvmlDeviceGetTemperature = NULL;
 nvmlDeviceGetFanSpeed_fn nvmlDeviceGetFanSpeed = NULL;
-
-static void *nvml_handle = NULL;
 /* interface with NVML - end */
 
 #define GK_PLUGIN_NAME "nvidia"
@@ -74,74 +67,45 @@ static GkrellmPanel* panel = NULL;
 static int style_id = 0;
 static int system_gpu_count = 0;
 
-enum bool_t { False, True };
+#define UNUSED(x) (void)(x)
 
 typedef enum GPUProperties_t {
 	GPU_NAME,
 	GPU_CLOCK,
 	GPU_TEMP,
 	GPU_FAN,
-	GPU_PROPERTIES_COUNT
+	GPU_PROPS_NUM
 } GPUProperties;
 
 typedef enum TextAlignment_t {
 	RIGHT,
 	CENTER,
 	LEFT
-} TextAlignment;
+} TAlignment;
 
 typedef struct _GkrellmDecalRow {
 	GkrellmDecal* label;
 	GkrellmDecal* data;
 } GkrellmDecalRow;
 
-static GkrellmDecalRow decal_text[GK_MAX_GPUS * GPU_PROPERTIES_COUNT];
+static GkrellmDecalRow decal_text[GK_MAX_GPUS * GPU_PROPS_NUM];
 
-static gboolean decal_enabled[GPU_PROPERTIES_COUNT] = { True, True, True, True };
+static gboolean decal_enabled[GPU_PROPS_NUM] = {TRUE, TRUE, TRUE, TRUE};
 
-static TextAlignment decal_alignment[GPU_PROPERTIES_COUNT] = { CENTER, RIGHT, RIGHT, RIGHT };
+static TAlignment decal_align[GPU_PROPS_NUM] = {CENTER, RIGHT, RIGHT, RIGHT};
 
-static char decal_labels[GPU_PROPERTIES_COUNT][GK_MAX_TEXT] = {
+static char decal_labels[GPU_PROPS_NUM][GK_MAX_TEXT] = {
 	"",
 	"GPUX Clock",
 	"GPUX Temp",
 	"GPUX Fan"
 };
 
-#define UNUSED(x) (void)(x)
+static char nvml_path[GK_MAX_TEXT] = GKFREQ_NVML_SONAME;
 
-static int max(int a, int b)
-{
-	return (a > b)? a : b;
-}
+static void *nvml_handle = NULL;
 
-static int min(int a, int b)
-{
-	return (a > b)? b : a;
-}
-
-static int clamp(int v, int a, int b)
-{
-	return min(max(v, a), b);
-}
-
-static gboolean initialize_gpulib(void)
-{
-	nvml_handle = dlopen(GKFREQ_NVML_SONAME, RTLD_LAZY);
-	if (nvml_handle)
-	{
-		nvmlInit = (nvmlInit_fn)dlsym(nvml_handle, "nvmlInit");
-		nvmlShutdown = (nvmlShutdown_fn)dlsym(nvml_handle, "nvmlShutdown");
-		nvmlDeviceGetCount = (nvmlDeviceGetCount_fn)dlsym(nvml_handle, "nvmlDeviceGetCount");
-		nvmlDeviceGetHandleByIndex = (nvmlDeviceGetHandleByIndex_fn)dlsym(nvml_handle, "nvmlDeviceGetHandleByIndex");
-		nvmlDeviceGetName = (nvmlDeviceGetName_fn)dlsym(nvml_handle, "nvmlDeviceGetName");
-		nvmlDeviceGetClockInfo = (nvmlDeviceGetClockInfo_fn)dlsym(nvml_handle, "nvmlDeviceGetClockInfo");
-		nvmlDeviceGetTemperature = (nvmlDeviceGetTemperature_fn)dlsym(nvml_handle, "nvmlDeviceGetTemperature");
-		nvmlDeviceGetFanSpeed = (nvmlDeviceGetFanSpeed_fn)dlsym(nvml_handle, "nvmlDeviceGetFanSpeed");
-	}
-
-	return (nvml_handle && (dlerror() == NULL) && (nvmlInit() == NVML_SUCCESS));
-}
+#define BIND_FUNCTION(fun, handle) fun = (fun##_fn)dlsym(handle, #fun)
 
 static void shutdown_gpulib(void)
 {
@@ -154,20 +118,42 @@ static void shutdown_gpulib(void)
 	}
 }
 
+static gboolean initialize_gpulib(void)
+{
+	shutdown_gpulib();
+
+	nvml_handle = dlopen(nvml_path, RTLD_LAZY);
+	if (nvml_handle)
+	{
+		BIND_FUNCTION(nvmlInit, nvml_handle);
+		BIND_FUNCTION(nvmlShutdown, nvml_handle);
+		BIND_FUNCTION(nvmlDeviceGetCount, nvml_handle);
+		BIND_FUNCTION(nvmlDeviceGetHandleByIndex, nvml_handle);
+		BIND_FUNCTION(nvmlDeviceGetName, nvml_handle);
+		BIND_FUNCTION(nvmlDeviceGetClockInfo, nvml_handle);
+		BIND_FUNCTION(nvmlDeviceGetTemperature, nvml_handle);
+		BIND_FUNCTION(nvmlDeviceGetFanSpeed, nvml_handle);
+	}
+
+	return (nvml_handle != NULL &&
+		    dlerror() == NULL &&
+			nvmlInit() == NVML_SUCCESS);
+}
+
 static int get_gpu_count(void)
 {
 	nvmlReturn_t res;
-	unsigned int gpu_count;
+	guint gpu_count;
 
 	res = nvmlDeviceGetCount(&gpu_count);
 
-	return (res == NVML_SUCCESS)? min(GK_MAX_GPUS, gpu_count) : 0;
+	return (res == NVML_SUCCESS)? MIN(GK_MAX_GPUS, gpu_count) : 0;
 }
 
 static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 {
 	nvmlReturn_t res = NVML_ERROR_UNKNOWN;
-	unsigned uint_attribute = -1;
+	guint attr = -1;
 	nvmlDevice_t device;
 
 	if (nvmlDeviceGetHandleByIndex(gpu_id, &device) == NVML_SUCCESS) {
@@ -179,21 +165,21 @@ static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 			break;
 
 		case GPU_CLOCK:
-			res = nvmlDeviceGetClockInfo(device, NVML_CLOCK_GRAPHICS, &uint_attribute);
+			res = nvmlDeviceGetClockInfo(device, NVML_CLOCK_GRAPHICS, &attr);
 			if (res == NVML_SUCCESS)
-				snprintf(buf, buf_size, "%uMHz", uint_attribute);
+				snprintf(buf, buf_size, "%uMHz", attr);
 			break;
 
 		case GPU_TEMP:
-			res = nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU, &uint_attribute);
+			res = nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU, &attr);
 			if (res == NVML_SUCCESS)
-				snprintf(buf, buf_size, "%.1fC", (float)uint_attribute);
+				snprintf(buf, buf_size, "%.1fC", (float)attr);
 			break;
 
 		case GPU_FAN:
-			res = nvmlDeviceGetFanSpeed(device, &uint_attribute);
+			res = nvmlDeviceGetFanSpeed(device, &attr);
 			if (res == NVML_SUCCESS)
-				snprintf(buf, buf_size, "%d%%", clamp(uint_attribute, 0, 100));
+				snprintf(buf, buf_size, "%d%%", CLAMP(attr, 0, 100));
 			break;
 		}
 
@@ -231,34 +217,32 @@ static void panel_click_event(GtkWidget *w, GdkEventButton *event, gpointer p)
 
 static void update_plugin(void)
 {
-	if (system_gpu_count == 0)
-		return;
-
 	GkrellmStyle *style = gkrellm_panel_style(style_id);
 	GkrellmMargin *m = gkrellm_get_style_margins(style);
-	GdkFont* f = gdk_font_from_description(decal_text[0].label->text_style.font);
+	GkrellmDecal *d;
 	int w = gkrellm_chart_width();
 	int w_text, i, p, idx;
 	static char temp_string[GK_MAX_TEXT] = "N/A";
 
 	for (i = 0; i < system_gpu_count; ++i) {
 
-		idx = i * GPU_PROPERTIES_COUNT;
+		idx = i * GPU_PROPS_NUM;
 
-		for (p = 0; p < GPU_PROPERTIES_COUNT; ++p) {
+		for (p = 0; p < GPU_PROPS_NUM; ++p) {
 
-			if (decal_enabled[p]) {
+			d = decal_text[idx + p].label;
+
+			if (decal_enabled[p] && d != NULL) {
 
 				decal_labels[p][3] = i + '0';
-				gkrellm_draw_decal_text(panel,
-				                        decal_text[idx + p].label,
-				                        decal_labels[p],
-				                        0);
+				gkrellm_draw_decal_text(panel, d, decal_labels[p], 0);
 
 				get_gpu_data(i, p, temp_string, GK_MAX_TEXT);
-				w_text = gdk_string_width(f, temp_string);
+				
+				w_text = gkrellm_gdk_string_width(d->text_style.font,
+				                                  temp_string);
 
-				switch (decal_alignment[p]) {
+				switch (decal_align[p]) {
 				case LEFT:
 					decal_text[idx + p].data->x = m->left;
 					break;
@@ -291,7 +275,7 @@ create_decal_row(int i, GPUProperties off, gchar* label, gchar* text, int y)
 {
 	GkrellmStyle *style = gkrellm_meter_style(style_id);
 	GkrellmTextstyle *ts = gkrellm_meter_textstyle(style_id);
-	int idx = i * GPU_PROPERTIES_COUNT + off;
+	int idx = i * GPU_PROPS_NUM + off;
 
 	decal_text[idx].label = gkrellm_create_decal_text(panel,
 	                                                  label,
@@ -309,8 +293,8 @@ create_decal_row(int i, GPUProperties off, gchar* label, gchar* text, int y)
 	                                                 y,
 	                                                 -1);
 
-	return max(decal_text[idx].label->y, decal_text[idx].data->y) +
-	       max(decal_text[idx].label->h, decal_text[idx].data->h);
+	return MAX(decal_text[idx].label->y, decal_text[idx].data->y) +
+	       MAX(decal_text[idx].label->h, decal_text[idx].data->h);
 }
 
 static void empty_panel(void)
@@ -356,7 +340,7 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 
 		gkrellm_disable_plugin_connect(monitor, shutdown_gpulib);
 
-		if (initialize_gpulib() != True) {
+		if (!initialize_gpulib()) {
 			gkrellm_debug(G_LOG_LEVEL_ERROR, "NVML failed to load");
 			shutdown_gpulib();	
 			return;
@@ -389,11 +373,19 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 
 static void cb_toggle(GtkWidget* button, gpointer data)
 {
+	gboolean active = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(button));
+
 	if (data != NULL)
-		*(int*)data = GTK_TOGGLE_BUTTON(button)->active;
+		*(gboolean*)data = active;
 
 	empty_panel();
 	populate_panel();
+}
+
+static void cb_pathchanged(GtkWidget* widget, gpointer data)
+{
+	UNUSED(widget);
+	UNUSED(data);
 }
 
 static void create_plugin_tab(GtkWidget* tab_vbox)
@@ -409,8 +401,8 @@ static void create_plugin_tab(GtkWidget* tab_vbox)
 	gkrellm_gtk_check_button_connected(vbox,
 	                                   NULL,
 	                                   decal_enabled[GPU_CLOCK],
-	                                   False,
-	                                   False,
+	                                   FALSE,
+	                                   FALSE,
 	                                   0,
 	                                   cb_toggle,
 	                                   &decal_enabled[GPU_CLOCK],
@@ -419,8 +411,8 @@ static void create_plugin_tab(GtkWidget* tab_vbox)
 	gkrellm_gtk_check_button_connected(vbox,
 	                                   NULL,
 	                                   decal_enabled[GPU_TEMP],
-	                                   False,
-	                                   False,
+	                                   FALSE,
+	                                   FALSE,
 	                                   0,
 	                                   cb_toggle,
 	                                   &decal_enabled[GPU_TEMP],
@@ -429,12 +421,32 @@ static void create_plugin_tab(GtkWidget* tab_vbox)
 	gkrellm_gtk_check_button_connected(vbox,
 	                                   NULL,
 	                                   decal_enabled[GPU_FAN],
-	                                   False,
-	                                   False,
+	                                   FALSE,
+	                                   FALSE,
 	                                   0,
 	                                   cb_toggle,
 	                                   &decal_enabled[GPU_FAN],
-	                                   _("Show GPU Fan Speed (if supported)"));
+	                                   _("Show GPU Fan Speed"));
+}
+
+static void save_plugin_config(FILE *f)
+{
+    fprintf(f, "%s NVML: %s Decals: %d %d %d\n", GK_CONFIG_KEYWORD,
+	                                             nvml_path,
+	                                             decal_enabled[GPU_CLOCK],
+	                                             decal_enabled[GPU_TEMP],
+	                                             decal_enabled[GPU_FAN]);
+}
+
+
+static void load_plugin_config(gchar *arg)
+{
+	UNUSED(arg);
+
+	strcpy(nvml_path, GKFREQ_NVML_SONAME);
+	decal_enabled[GPU_CLOCK] = TRUE;
+	decal_enabled[GPU_TEMP] = TRUE;
+	decal_enabled[GPU_FAN] = TRUE;
 }
 
 static GkrellmMonitor plugin_mon =
@@ -446,8 +458,8 @@ static GkrellmMonitor plugin_mon =
 	create_plugin_tab,           /* The create_plugin_tab() config function  */
 	NULL,                        /* The apply_plugin_config() function       */
 
-	NULL,                        /* The save_plugin_config() function        */
-	NULL,                        /* The load_plugin_config() function        */
+	save_plugin_config,          /* The save_plugin_config() function        */
+	load_plugin_config,          /* The load_plugin_config() function        */
 	GK_CONFIG_KEYWORD,           /* config keyword                           */
 
 	NULL,                        /* Undefined 2                              */

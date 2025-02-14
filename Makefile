@@ -1,4 +1,4 @@
-CFLAGS += -O2 -fpic -Wall -Wextra `pkg-config gkrellm --cflags`
+CFLAGS += -O2 -fpic -Wall -Wextra $(shell pkg-config gkrellm --cflags)
 LDFLAGS += -shared
 INSTALLFLAGS = -m755 -s
 
