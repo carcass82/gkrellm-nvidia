@@ -6,6 +6,4 @@ Clock, Temperature and Fan Speed for multiple GPU are supported.
 ~~XNVCtrl library *is required*~~
 [NVML](https://developer.nvidia.com/nvidia-management-library-nvml) library *is required*
 
-![sample](doc/screen.jpg)
-
 ![sample multigpu](doc/screen-dualgpu.jpg)
