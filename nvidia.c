@@ -63,10 +63,12 @@ nvmlDeviceGetFanSpeed_fn nvmlDeviceGetFanSpeed = NULL;
 #define GK_MAX_TEXT 64
 #define GK_MAX_PATH CFG_BUFSIZE
 
+static GtkWidget *plugin_vbox = NULL;
 static GkrellmMonitor* monitor = NULL;
 static GkrellmPanel* panel = NULL;
 static int style_id = 0;
 static int system_gpu_count = 0;
+static gboolean needs_reinitialization = FALSE;
 
 #define UNUSED(x) (void)(x)
 
@@ -116,12 +118,13 @@ static void shutdown_gpulib(void)
 			nvmlShutdown();
 		
 		dlclose(nvml_handle);
+		nvml_handle = NULL;
 	}
 }
 
 static gboolean initialize_gpulib(void)
 {
-	shutdown_gpulib();
+	static gboolean res = FALSE;
 
 	nvml_handle = dlopen(nvml_path, RTLD_LAZY);
 	if (nvml_handle)
@@ -134,21 +137,31 @@ static gboolean initialize_gpulib(void)
 		BIND_FUNCTION(nvml_handle, nvmlDeviceGetClockInfo);
 		BIND_FUNCTION(nvml_handle, nvmlDeviceGetTemperature);
 		BIND_FUNCTION(nvml_handle, nvmlDeviceGetFanSpeed);
+
+		res = (dlerror() == NULL && nvmlInit() == NVML_SUCCESS);
 	}
 
-	return (nvml_handle != NULL &&
-		    dlerror() == NULL &&
-			nvmlInit() == NVML_SUCCESS);
+	if (!res)
+		gkrellm_debug(G_LOG_LEVEL_ERROR, "could not load '%s'", nvml_path);
+
+	return res;
 }
 
-static int get_gpu_count(void)
+static gboolean reinitialize_gpulib(void)
+{
+	shutdown_gpulib();
+	return initialize_gpulib();
+}
+
+static void update_gpu_count(void)
 {
 	nvmlReturn_t res;
 	guint gpu_count;
 
-	res = nvmlDeviceGetCount(&gpu_count);
+	res = nvmlDeviceGetCount &&
+	      (nvmlDeviceGetCount(&gpu_count) == NVML_SUCCESS);
 
-	return (res == NVML_SUCCESS)? MIN(GK_MAX_GPUS, gpu_count) : 0;
+	system_gpu_count = res? MIN(GK_MAX_GPUS, gpu_count) : 0;
 }
 
 static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
@@ -272,11 +285,11 @@ static void update_plugin(void)
 }
 
 static int
-create_decal_row(int i, GPUProperties off, gchar* label, gchar* text, int y)
+create_decal_row(int i, GPUProperties offset, gchar* label, gchar* text, int y)
 {
 	GkrellmStyle *style = gkrellm_meter_style(style_id);
 	GkrellmTextstyle *ts = gkrellm_meter_textstyle(style_id);
-	int idx = i * GPU_PROPS_NUM + off;
+	int idx = i * GPU_PROPS_NUM + offset;
 
 	decal_text[idx].label = gkrellm_create_decal_text(panel,
 	                                                  label,
@@ -298,16 +311,10 @@ create_decal_row(int i, GPUProperties off, gchar* label, gchar* text, int y)
 	       MAX(decal_text[idx].label->h, decal_text[idx].data->h);
 }
 
-static void empty_panel(void)
-{
-	gkrellm_destroy_decal_list(panel);
-}
-
 static void populate_panel(void)
 {
 	int i, y;
-	GkrellmStyle *style = gkrellm_meter_style(style_id);
-
+	
 	for (y = -1, i = 0; i < system_gpu_count; ++i) {
 
 		y = create_decal_row(i, GPU_NAME, "", "GPU_NAME", y);
@@ -330,34 +337,24 @@ static void populate_panel(void)
 
 		y += ((i == system_gpu_count - 1)? 1 : 10);
 	}
-
-	gkrellm_panel_configure(panel, NULL, style);
 }
 
-static void create_plugin(GtkWidget* vbox, gint first_create)
+static void destroy_nv_panel()
 {
-	if (first_create) {
+	gkrellm_panel_destroy(panel);
+	panel = NULL;
+}
+
+static void create_nv_panel(gint first_create)
+{
+	if (!panel)
 		panel = gkrellm_panel_new0();
 
-		gkrellm_disable_plugin_connect(monitor, shutdown_gpulib);
-
-		if (!initialize_gpulib()) {
-			gkrellm_debug(G_LOG_LEVEL_ERROR, "NVML failed to load");
-			shutdown_gpulib();	
-			return;
-		}
-
-		system_gpu_count = get_gpu_count();
-	
-	} else {
-
-		empty_panel();
-	
-	}
-
 	populate_panel();
+
+	gkrellm_panel_configure(panel, NULL, gkrellm_meter_style(style_id));
 	
-	gkrellm_panel_create(vbox, monitor, panel);
+	gkrellm_panel_create(plugin_vbox, monitor, panel);
 
 	if (first_create) {
 		g_signal_connect(G_OBJECT(panel->drawing_area),
@@ -372,6 +369,28 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 	}
 }
 
+static void rebuild_nv_panel()
+{
+	destroy_nv_panel();
+	create_nv_panel(TRUE);
+}
+
+static void create_plugin(GtkWidget* vbox, gint first_create)
+{
+	if (first_create) {
+		plugin_vbox = gtk_vbox_new(FALSE, 0);
+		gtk_box_pack_start(GTK_BOX(vbox), plugin_vbox, FALSE, FALSE, 0);
+		gtk_widget_show(plugin_vbox);
+
+		if (initialize_gpulib())
+			update_gpu_count();
+
+		gkrellm_disable_plugin_connect(monitor, shutdown_gpulib);
+	}
+
+	create_nv_panel(first_create);
+}
+
 static void cb_toggle(GtkWidget* button, gpointer data)
 {
 	gboolean active = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(button));
@@ -379,8 +398,7 @@ static void cb_toggle(GtkWidget* button, gpointer data)
 	if (data != NULL)
 		*(gboolean*)data = active;
 
-	empty_panel();
-	populate_panel();
+	rebuild_nv_panel();
 }
 
 static void cb_pathchanged(GtkWidget* widget, gpointer data)
@@ -390,7 +408,7 @@ static void cb_pathchanged(GtkWidget* widget, gpointer data)
 	static const char *ICON_OK = "gtk-yes";
 	static const char *ICON_KO = "gtk-no";
 
-	gchar *text;
+	gchar *text = NULL;
 	gboolean valid_path = FALSE;
 	GIcon* valid_icon = NULL;
 
@@ -404,8 +422,17 @@ static void cb_pathchanged(GtkWidget* widget, gpointer data)
 	                              valid_icon);
 
 	g_object_unref(valid_icon);
+
+	needs_reinitialization = valid_path;
+	if (valid_path)
+		strcpy(nvml_path, text);
 }
 
+/*
+ * wrapper for gtk entry with label following the style of
+ * gkrellm_gtk_check_button_connected or gkrellm_gtk_button_connected
+ * found in gkrellm src/gui.c
+ */
 static void
 gkrellm_gtk_entry_connected(GtkWidget *box, GtkWidget **entry, gchar* text,
                             gboolean expand, gboolean fill, gint pad,
@@ -488,6 +515,12 @@ static void create_plugin_tab(GtkWidget* tab_vbox)
 
 static void apply_plugin_config(void)
 {
+	if (needs_reinitialization) {
+		if (reinitialize_gpulib())
+			update_gpu_count();
+		rebuild_nv_panel();
+		needs_reinitialization = FALSE;
+	}
 }
 
 static void save_plugin_config(FILE *f)
@@ -502,11 +535,12 @@ static void save_plugin_config(FILE *f)
 
 static void load_plugin_config(gchar *arg)
 {
-    gchar config_key[32];
+    gchar config_key[16];
     gchar config_line[512];
 	gboolean read_config_ok = FALSE;
+	int i;
     
-    if (sscanf(arg, "%31s %511[^\n]", config_key, config_line) == 2) {
+    if (sscanf(arg, "%15s %511[^\n]", config_key, config_line) == 2) {
 	
 		if (!strcmp(config_key, "NVML"))
 			if (sscanf(config_line, "%d %d %d %s", &decal_enabled[GPU_CLOCK],
@@ -519,9 +553,9 @@ static void load_plugin_config(gchar *arg)
 
 	if (!read_config_ok) {
 		strcpy(nvml_path, GKFREQ_NVML_SONAME);
-		decal_enabled[GPU_CLOCK] = TRUE;
-		decal_enabled[GPU_TEMP] = TRUE;
-		decal_enabled[GPU_FAN] = TRUE;
+
+		for (i = GPU_CLOCK; i < GPU_PROPS_NUM; ++i)
+			decal_enabled[i] = TRUE;
 	}
 }
 
