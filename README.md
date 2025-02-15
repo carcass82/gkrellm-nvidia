@@ -7,3 +7,5 @@ Clock, Temperature and Fan Speed for multiple GPU are supported.
 [NVML](https://developer.nvidia.com/nvidia-management-library-nvml) library *is required*
 
 ![sample multigpu](doc/screen-dualgpu.jpg)
+
+![sample options](doc/screen-options.jpg)
