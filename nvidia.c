@@ -61,6 +61,7 @@ nvmlDeviceGetFanSpeed_fn nvmlDeviceGetFanSpeed = NULL;
 #define GK_MAX_GPUS 4
 #define GK_CONFIG_KEYWORD "nvidia"
 #define GK_MAX_TEXT 64
+#define GK_MAX_PATH CFG_BUFSIZE
 
 static GkrellmMonitor* monitor = NULL;
 static GkrellmPanel* panel = NULL;
@@ -101,11 +102,11 @@ static char decal_labels[GPU_PROPS_NUM][GK_MAX_TEXT] = {
 	"GPUX Fan"
 };
 
-static char nvml_path[GK_MAX_TEXT] = GKFREQ_NVML_SONAME;
+static char nvml_path[GK_MAX_PATH] = GKFREQ_NVML_SONAME;
 
 static void *nvml_handle = NULL;
 
-#define BIND_FUNCTION(fun, handle) fun = (fun##_fn)dlsym(handle, #fun)
+#define BIND_FUNCTION(handle, fun) fun = (fun##_fn)dlsym(handle, #fun)
 
 static void shutdown_gpulib(void)
 {
@@ -125,14 +126,14 @@ static gboolean initialize_gpulib(void)
 	nvml_handle = dlopen(nvml_path, RTLD_LAZY);
 	if (nvml_handle)
 	{
-		BIND_FUNCTION(nvmlInit, nvml_handle);
-		BIND_FUNCTION(nvmlShutdown, nvml_handle);
-		BIND_FUNCTION(nvmlDeviceGetCount, nvml_handle);
-		BIND_FUNCTION(nvmlDeviceGetHandleByIndex, nvml_handle);
-		BIND_FUNCTION(nvmlDeviceGetName, nvml_handle);
-		BIND_FUNCTION(nvmlDeviceGetClockInfo, nvml_handle);
-		BIND_FUNCTION(nvmlDeviceGetTemperature, nvml_handle);
-		BIND_FUNCTION(nvmlDeviceGetFanSpeed, nvml_handle);
+		BIND_FUNCTION(nvml_handle, nvmlInit);
+		BIND_FUNCTION(nvml_handle, nvmlShutdown);
+		BIND_FUNCTION(nvml_handle, nvmlDeviceGetCount);
+		BIND_FUNCTION(nvml_handle, nvmlDeviceGetHandleByIndex);
+		BIND_FUNCTION(nvml_handle, nvmlDeviceGetName);
+		BIND_FUNCTION(nvml_handle, nvmlDeviceGetClockInfo);
+		BIND_FUNCTION(nvml_handle, nvmlDeviceGetTemperature);
+		BIND_FUNCTION(nvml_handle, nvmlDeviceGetFanSpeed);
 	}
 
 	return (nvml_handle != NULL &&
@@ -384,8 +385,54 @@ static void cb_toggle(GtkWidget* button, gpointer data)
 
 static void cb_pathchanged(GtkWidget* widget, gpointer data)
 {
-	UNUSED(widget);
 	UNUSED(data);
+
+	static const char *ICON_OK = "gtk-yes";
+	static const char *ICON_KO = "gtk-no";
+
+	gchar *text;
+	gboolean valid_path = FALSE;
+	GIcon* valid_icon = NULL;
+
+	gkrellm_dup_string(&text, gkrellm_gtk_entry_get_text(&widget));
+
+	valid_path = (strlen(text) > 0) && (dlopen(text, RTLD_LAZY) != NULL);
+	valid_icon = g_themed_icon_new(valid_path? ICON_OK : ICON_KO);
+
+	gtk_entry_set_icon_from_gicon(GTK_ENTRY(widget),
+	                              GTK_ENTRY_ICON_SECONDARY,
+	                              valid_icon);
+
+	g_object_unref(valid_icon);
+}
+
+static void
+gkrellm_gtk_entry_connected(GtkWidget *box, GtkWidget **entry, gchar* text,
+                            gboolean expand, gboolean fill, gint pad,
+                            void (*cb_func)(), gpointer data, gchar *label)
+{
+	GtkWidget *l = gtk_label_new(label);
+	GtkWidget *e = gtk_entry_new_with_max_length(GK_MAX_PATH);
+
+	GtkWidget *h = gtk_hbox_new(FALSE, 4);
+	gtk_box_pack_start(GTK_BOX(h), l, FALSE, FALSE, 4);
+	gtk_box_pack_start(GTK_BOX(h), e, TRUE, TRUE, 4);
+
+	if (text)
+		gtk_entry_set_text(GTK_ENTRY(e), text);
+	
+	if (box) {
+		if (pad < 0)
+			gtk_box_pack_end(GTK_BOX(box), h, expand, fill, -(pad + 1));
+		else
+			gtk_box_pack_start(GTK_BOX(box), h, expand, fill, pad);
+	}
+	
+	if (cb_func)
+		g_signal_connect(G_OBJECT(e), "changed", G_CALLBACK(cb_func), data);
+	
+	if (entry)
+		*entry = h;
 }
 
 static void create_plugin_tab(GtkWidget* tab_vbox)
@@ -398,6 +445,16 @@ static void create_plugin_tab(GtkWidget* tab_vbox)
 
 	vbox = gkrellm_gtk_framed_notebook_page(tabs, _("Options"));
 	
+	gkrellm_gtk_entry_connected(vbox,
+	                            NULL,
+	                            nvml_path,
+	                            FALSE,
+	                            FALSE,
+	                            0,
+	                            cb_pathchanged,
+	                            NULL,
+	                            _("libNVML path"));
+
 	gkrellm_gtk_check_button_connected(vbox,
 	                                   NULL,
 	                                   decal_enabled[GPU_CLOCK],
@@ -429,24 +486,43 @@ static void create_plugin_tab(GtkWidget* tab_vbox)
 	                                   _("Show GPU Fan Speed"));
 }
 
+static void apply_plugin_config(void)
+{
+}
+
 static void save_plugin_config(FILE *f)
 {
-    fprintf(f, "%s NVML: %s Decals: %d %d %d\n", GK_CONFIG_KEYWORD,
-	                                             nvml_path,
-	                                             decal_enabled[GPU_CLOCK],
-	                                             decal_enabled[GPU_TEMP],
-	                                             decal_enabled[GPU_FAN]);
+    fprintf(f, "%s NVML %d %d %d %s\n", GK_CONFIG_KEYWORD,
+	                                    decal_enabled[GPU_CLOCK],
+	                                    decal_enabled[GPU_TEMP],
+	                                    decal_enabled[GPU_FAN],
+										nvml_path);
 }
 
 
 static void load_plugin_config(gchar *arg)
 {
-	UNUSED(arg);
+    gchar config_key[32];
+    gchar config_line[512];
+	gboolean read_config_ok = FALSE;
+    
+    if (sscanf(arg, "%31s %511[^\n]", config_key, config_line) == 2) {
+	
+		if (!strcmp(config_key, "NVML"))
+			if (sscanf(config_line, "%d %d %d %s", &decal_enabled[GPU_CLOCK],
+			                                       &decal_enabled[GPU_TEMP],
+			                                       &decal_enabled[GPU_FAN],
+			                                       nvml_path) == 4)
+				read_config_ok = TRUE;
 
-	strcpy(nvml_path, GKFREQ_NVML_SONAME);
-	decal_enabled[GPU_CLOCK] = TRUE;
-	decal_enabled[GPU_TEMP] = TRUE;
-	decal_enabled[GPU_FAN] = TRUE;
+	}
+
+	if (!read_config_ok) {
+		strcpy(nvml_path, GKFREQ_NVML_SONAME);
+		decal_enabled[GPU_CLOCK] = TRUE;
+		decal_enabled[GPU_TEMP] = TRUE;
+		decal_enabled[GPU_FAN] = TRUE;
+	}
 }
 
 static GkrellmMonitor plugin_mon =
@@ -456,7 +532,7 @@ static GkrellmMonitor plugin_mon =
 	create_plugin,               /* The create_plugin() function             */
 	update_plugin,               /* The update_plugin() function             */
 	create_plugin_tab,           /* The create_plugin_tab() config function  */
-	NULL,                        /* The apply_plugin_config() function       */
+	apply_plugin_config,         /* The apply_plugin_config() function       */
 
 	save_plugin_config,          /* The save_plugin_config() function        */
 	load_plugin_config,          /* The load_plugin_config() function        */
