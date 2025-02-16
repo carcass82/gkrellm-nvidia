@@ -525,18 +525,18 @@ static void apply_plugin_config(void)
 
 static void save_plugin_config(FILE *f)
 {
-    fprintf(f, "%s NVML %d %d %d %s\n", GK_CONFIG_KEYWORD,
+	fprintf(f, "%s NVML %d %d %d %s\n", GK_CONFIG_KEYWORD,
 	                                    decal_enabled[GPU_CLOCK],
 	                                    decal_enabled[GPU_TEMP],
 	                                    decal_enabled[GPU_FAN],
-										nvml_path);
+	                                    nvml_path);
 }
 
 
 static void load_plugin_config(gchar *arg)
 {
-    gchar config_key[16];
-    gchar config_line[512];
+	gchar config_key[16];
+	gchar config_line[512];
 	gboolean read_config_ok = FALSE;
 	int i;
     
