@@ -540,7 +540,7 @@ static void load_plugin_config(gchar *arg)
 	gboolean read_config_ok = FALSE;
 	int i;
     
-    if (sscanf(arg, "%15s %511[^\n]", config_key, config_line) == 2) {
+	if (sscanf(arg, "%15s %511[^\n]", config_key, config_line) == 2) {
 	
 		if (!strcmp(config_key, "NVML"))
 			if (sscanf(config_line, "%d %d %d %s", &decal_enabled[GPU_CLOCK],
