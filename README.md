@@ -1,3 +1,5 @@
+![build status](https://github.com/carcass82/gkrellm-nvidia/actions/workflows/build-action.yml/badge.svg)
+
 A simple [GKrellM](http://gkrellm.srcbox.net/) plugin for reading nvidia GPUs data.
 Clock, Temperature and Fan Speed for multiple GPU are supported.
 
