@@ -381,12 +381,12 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 		plugin_vbox = gtk_vbox_new(FALSE, 0);
 		gtk_box_pack_start(GTK_BOX(vbox), plugin_vbox, FALSE, FALSE, 0);
 		gtk_widget_show(plugin_vbox);
+	}
 
-		if (initialize_gpulib())
+	if (initialize_gpulib())
 			update_gpu_count();
 
-		gkrellm_disable_plugin_connect(monitor, shutdown_gpulib);
-	}
+	gkrellm_disable_plugin_connect(monitor, shutdown_gpulib);
 
 	create_nv_panel(first_create);
 }
