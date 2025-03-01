@@ -21,26 +21,24 @@
 #include <gkrellm2/gkrellm.h>
 #include <dlfcn.h>
 
-/* default libNVML file name */
-#ifndef GKFREQ_NVML_SONAME
- #define GKFREQ_NVML_SONAME "libnvidia-ml.so"
-#endif
+#define GK_PLUGIN_NAME "nvidia"
+#define GK_MAX_GPUS 4
+#define GK_CONFIG_KEYWORD "nvidia"
+#define GK_MAX_TEXT 64
+#define GK_MAX_PATH CFG_BUFSIZE
+#define UNUSED(x) (void)(x)
 
 /* interface with NVML - begin */
-#define NVML_SUCCESS 0
-#define NVML_ERROR_UNKNOWN 999
-
-#define NVML_CLOCK_GRAPHICS 0
-#define NVML_TEMPERATURE_GPU 0
+typedef enum { NVML_SUCCESS, NVML_ERROR_UNKNOWN = 999 } nvmlReturn_t;
+typedef enum { NVML_CLOCK_GRAPHICS } nvmlClockType_t;
+typedef enum { NVML_TEMPERATURE_GPU } nvmlTemperatureSensors_t;
 
 typedef void* nvmlDevice_t;
-typedef int nvmlReturn_t;
-typedef int nvmlClockType_t;
-typedef int nvmlTemperatureSensors_t;
+
 typedef struct nvmlMemory_st {
- unsigned long long free;
- unsigned long long total;
- unsigned long long used;
+	unsigned long long free;
+	unsigned long long total;
+	unsigned long long used;
 } nvmlMemory_t;
 
 typedef struct nvmlUtilization_st {
@@ -73,11 +71,15 @@ nvmlDeviceGetUtilizationRates_fn nvmlDeviceGetUtilizationRates = NULL;
 nvmlDeviceGetMemoryInfo_fn nvmlDeviceGetMemoryInfo = NULL;
 /* interface with NVML - end */
 
-#define GK_PLUGIN_NAME "nvidia"
-#define GK_MAX_GPUS 4
-#define GK_CONFIG_KEYWORD "nvidia"
-#define GK_MAX_TEXT 64
-#define GK_MAX_PATH CFG_BUFSIZE
+#ifndef GKFREQ_NVML_SONAME
+ #define GKFREQ_NVML_SONAME "libnvidia-ml.so"
+#endif
+
+static char nvml_path[GK_MAX_PATH] = GKFREQ_NVML_SONAME;
+
+static void *nvml_handle = NULL;
+
+#define BIND_FUNCTION(handle, fun) fun = (fun##_fn)dlsym(handle, #fun)
 
 static GtkWidget *plugin_vbox = NULL;
 static GkrellmMonitor* monitor = NULL;
@@ -86,9 +88,7 @@ static int style_id = 0;
 static int system_gpu_count = 0;
 static gboolean needs_reinitialization = FALSE;
 
-#define UNUSED(x) (void)(x)
-
-typedef enum GPUProperties_t {
+typedef enum _GPUProperty {
 	GPU_NAME,
 	GPU_CLOCK,
 	GPU_TEMP,
@@ -96,16 +96,36 @@ typedef enum GPUProperties_t {
 	GPU_POWER,
 	GPU_USAGE,
 	GPU_MEMUSAGE,
-	GPU_MEM,
+	GPU_USEDMEM,
 	GPU_TOTALMEM,
 	GPU_PROPS_NUM
-} GPUProperties;
+} GPUProperty_t;
 
-typedef enum TextAlignment_t {
+typedef enum _TextAlignment {
 	RIGHT,
 	CENTER,
 	LEFT
-} TAlignment;
+} TextAlignment_t;
+
+typedef struct _GkrellmDecalRowInfo {
+	GPUProperty_t prop;
+	gboolean enable;
+	TextAlignment_t alignment;
+	char* label;
+	char* optionlabel;
+} GkrellmDecalRowInfo;
+
+static GkrellmDecalRowInfo decal_info[] = {
+	{ GPU_NAME,     TRUE, CENTER, "",                ""                                         },
+	{ GPU_CLOCK,    TRUE, RIGHT,  _("Clock"),        _("Show GPU Clock")                        },
+	{ GPU_TEMP,     TRUE, RIGHT,  _("Temp"),         _("Show GPU Temperature")                  },
+	{ GPU_FAN,      TRUE, RIGHT,  _("Fan"),          _("Show GPU Fan Speed")                    },
+	{ GPU_POWER,    TRUE, RIGHT,  _("Power"),        _("Show GPU Power Usage")                  },
+	{ GPU_USAGE,    TRUE, RIGHT,  _("Usage"),        _("Show GPU Usage")                        },
+	{ GPU_MEMUSAGE, TRUE, RIGHT,  _("Memory Usage"), _("Show GPU Memory Usage (as percentage)") },
+	{ GPU_USEDMEM,  TRUE, RIGHT,  _("Memory Usage"), _("Show GPU Memory In Use")                },
+	{ GPU_TOTALMEM, TRUE, RIGHT,  _("Total Memory"), _("Show GPU Total Memory")                 }
+};
 
 typedef struct _GkrellmDecalRow {
 	GkrellmDecal* label;
@@ -113,28 +133,6 @@ typedef struct _GkrellmDecalRow {
 } GkrellmDecalRow;
 
 static GkrellmDecalRow decal_text[GK_MAX_GPUS * GPU_PROPS_NUM];
-
-static gboolean decal_enabled[] = { TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE };
-
-static TAlignment decal_align[] = { CENTER, RIGHT, RIGHT, RIGHT, RIGHT, RIGHT, RIGHT, RIGHT, RIGHT };
-
-static char decal_labels[GPU_PROPS_NUM][GK_MAX_TEXT] = {
-	"",
-	"GPUX Clock",
-	"GPUX Temp",
-	"GPUX Fan",
-	"GPUX Power",
-	"GPUX Usage",
-	"GPUX Memory Usage",
-	"GPUX Memory Usage",
-	"GPUX Total Memory"
-};
-
-static char nvml_path[GK_MAX_PATH] = GKFREQ_NVML_SONAME;
-
-static void *nvml_handle = NULL;
-
-#define BIND_FUNCTION(handle, fun) fun = (fun##_fn)dlsym(handle, #fun)
 
 static void shutdown_gpulib(void)
 {
@@ -146,6 +144,17 @@ static void shutdown_gpulib(void)
 		dlclose(nvml_handle);
 		nvml_handle = NULL;
 	}
+}
+
+static gboolean is_valid_gpulib(char* path)
+{
+	void* temp_handle = NULL;
+	nvmlInit_fn temp_fn = NULL;
+
+	temp_handle = (strlen(path) > 0)? dlopen(path, RTLD_LAZY) : NULL;
+	temp_fn = (temp_handle != NULL)? (nvmlInit_fn)dlsym(temp_handle, "nvmlInit") : NULL;
+
+	return (temp_fn != NULL);
 }
 
 static gboolean initialize_gpulib(void)
@@ -228,7 +237,6 @@ static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 			break;
 
 		case GPU_POWER:
-		        /* in milliwatts */
 			res = nvmlDeviceGetPowerUsage(device, &attr);
 			if (res == NVML_SUCCESS)
 				snprintf(buf, buf_size, "%uW", attr / 1000);
@@ -241,11 +249,11 @@ static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 				snprintf(buf, buf_size, "%u%%", (info == GPU_USAGE)? utilization.gpu : utilization.memory);
 			break;
 
-		case GPU_MEM:
+		case GPU_USEDMEM:
 		case GPU_TOTALMEM:
 			res = nvmlDeviceGetMemoryInfo(device, &memInfo);
 			if (res == NVML_SUCCESS)
-				snprintf(buf, buf_size, "%lluMB", ((info == GPU_MEM)? memInfo.used : memInfo.total) / 1024 / 1024);
+				snprintf(buf, buf_size, "%lluMB", ((info == GPU_USEDMEM)? memInfo.used : memInfo.total) / 1024 / 1024);
 			break;
 		}
 
@@ -298,17 +306,16 @@ static void update_plugin(void)
 
 			d = decal_text[idx + p].label;
 
-			if (decal_enabled[p] && d != NULL) {
+			if (decal_info[p].enable && d != NULL) {
 
-				decal_labels[p][3] = i + '0';
-				gkrellm_draw_decal_text(panel, d, decal_labels[p], 0);
+				gkrellm_draw_decal_text(panel, d, decal_info[p].label, 0);
 
 				get_gpu_data(i, p, temp_string, GK_MAX_TEXT);
 				
 				w_text = gkrellm_gdk_string_width(d->text_style.font,
 				                                  temp_string);
 
-				switch (decal_align[p]) {
+				switch (decal_info[p].alignment) {
 				case LEFT:
 					decal_text[idx + p].data->x = m->left;
 					break;
@@ -337,7 +344,7 @@ static void update_plugin(void)
 }
 
 static int
-create_decal_row(int i, GPUProperties offset, gchar* label, gchar* text, int y)
+create_decal_row(int i, GPUProperty_t offset, gchar* label, gchar* text, int y)
 {
 	GkrellmStyle *style = gkrellm_meter_style(style_id);
 	GkrellmTextstyle *ts = gkrellm_meter_textstyle(style_id);
@@ -365,52 +372,21 @@ create_decal_row(int i, GPUProperties offset, gchar* label, gchar* text, int y)
 
 static void populate_panel(void)
 {
-	int i, y;
+	int i, j, y;
 	
 	for (y = -1, i = 0; i < system_gpu_count; ++i) {
 
-		y = create_decal_row(i, GPU_NAME, "", "GPU_NAME", y);
-		y += 5;
+		for (j = GPU_NAME; j < GPU_PROPS_NUM; ++j) {
 
-		if (decal_enabled[GPU_CLOCK]) {
-			y = create_decal_row(i, GPU_CLOCK, decal_labels[GPU_CLOCK], "8888MHz", y);
-			y += 1;
+			if (decal_info[j].enable) {
+				y = create_decal_row(i, j, decal_info[j].label, "8888888", y);
+				y += ((j == GPU_NAME)? 5 : 1);
+			}
+
 		}
-
-		if (decal_enabled[GPU_TEMP]) {
-			y = create_decal_row(i, GPU_TEMP, decal_labels[GPU_TEMP], "88.8C", y);
-			y += 1;
-		}
-
-		if (decal_enabled[GPU_FAN]) {
-			y = create_decal_row(i, GPU_FAN, decal_labels[GPU_FAN], "888%", y);
-			y += 1;
-		}
-
-		if (decal_enabled[GPU_POWER]) {
-			y = create_decal_row(i, GPU_POWER, decal_labels[GPU_POWER], "888W", y);
-			y += 1;
-		}
-
-		if (decal_enabled[GPU_USAGE]) {
-			y = create_decal_row(i, GPU_USAGE, decal_labels[GPU_USAGE], "888%", y);
-			y += 1;
-		}
-
-		if (decal_enabled[GPU_MEM]) {
-			y = create_decal_row(i, GPU_MEM, decal_labels[GPU_MEM], "8888MB", y);
-			y += 1;
-		}
-
-		if (decal_enabled[GPU_MEMUSAGE]) {
-			y = create_decal_row(i, GPU_MEMUSAGE, decal_labels[GPU_MEMUSAGE], "888%", y);
-			y += 1;
-		}
-
-		if (decal_enabled[GPU_TOTALMEM])
-			y = create_decal_row(i, GPU_TOTALMEM, decal_labels[GPU_TOTALMEM], "8888MB", y);
-
+		
 		y += ((i == system_gpu_count - 1)? 1 : 10);
+	
 	}
 }
 
@@ -489,7 +465,7 @@ static void cb_pathchanged(GtkWidget* widget, gpointer data)
 
 	gkrellm_dup_string(&text, gkrellm_gtk_entry_get_text(&widget));
 
-	valid_path = (strlen(text) > 0) && (dlopen(text, RTLD_LAZY) != NULL);
+	valid_path = is_valid_gpulib(text);
 	valid_icon = g_themed_icon_new(valid_path? ICON_OK : ICON_KO);
 
 	gtk_entry_set_icon_from_gicon(GTK_ENTRY(widget),
@@ -539,6 +515,7 @@ gkrellm_gtk_entry_connected(GtkWidget *box, GtkWidget **entry, gchar* text,
 
 static void create_plugin_tab(GtkWidget* tab_vbox)
 {
+	int i;
 	GtkWidget *tabs, *vbox;
 	
 	tabs = gtk_notebook_new();
@@ -557,85 +534,16 @@ static void create_plugin_tab(GtkWidget* tab_vbox)
 	                            NULL,
 	                            _("libNVML path"));
 
-	gkrellm_gtk_check_button_connected(vbox,
-	                                   NULL,
-	                                   decal_enabled[GPU_CLOCK],
-	                                   FALSE,
-	                                   FALSE,
-	                                   0,
-	                                   cb_toggle,
-	                                   &decal_enabled[GPU_CLOCK],
-	                                   _("Show GPU Clock"));
-	
-	gkrellm_gtk_check_button_connected(vbox,
-	                                   NULL,
-	                                   decal_enabled[GPU_TEMP],
-	                                   FALSE,
-	                                   FALSE,
-	                                   0,
-	                                   cb_toggle,
-	                                   &decal_enabled[GPU_TEMP],
-	                                   _("Show GPU Temperature"));
-	
-	gkrellm_gtk_check_button_connected(vbox,
-	                                   NULL,
-	                                   decal_enabled[GPU_FAN],
-	                                   FALSE,
-	                                   FALSE,
-	                                   0,
-	                                   cb_toggle,
-	                                   &decal_enabled[GPU_FAN],
-	                                   _("Show GPU Fan Speed"));
-
-	gkrellm_gtk_check_button_connected(vbox,
-	                                   NULL,
-	                                   decal_enabled[GPU_POWER],
-	                                   FALSE,
-	                                   FALSE,
-	                                   0,
-	                                   cb_toggle,
-	                                   &decal_enabled[GPU_POWER],
-	                                   _("Show GPU Power Usage"));
-
-	gkrellm_gtk_check_button_connected(vbox,
-	                                   NULL,
-	                                   decal_enabled[GPU_USAGE],
-	                                   FALSE,
-	                                   FALSE,
-	                                   0,
-	                                   cb_toggle,
-	                                   &decal_enabled[GPU_USAGE],
-	                                   _("Show GPU Usage"));
-
-	gkrellm_gtk_check_button_connected(vbox,
-	                                   NULL,
-	                                   decal_enabled[GPU_MEM],
-	                                   FALSE,
-	                                   FALSE,
-	                                   0,
-	                                   cb_toggle,
-	                                   &decal_enabled[GPU_MEM],
-	                                   _("Show GPU Memory Usage"));
-
-	gkrellm_gtk_check_button_connected(vbox,
-	                                   NULL,
-	                                   decal_enabled[GPU_MEMUSAGE],
-	                                   FALSE,
-	                                   FALSE,
-	                                   0,
-	                                   cb_toggle,
-	                                   &decal_enabled[GPU_MEMUSAGE],
-	                                   _("Show GPU Memory Usage (as percentage)"));
-
-	gkrellm_gtk_check_button_connected(vbox,
-	                                   NULL,
-	                                   decal_enabled[GPU_TOTALMEM],
-	                                   FALSE,
-	                                   FALSE,
-	                                   0,
-	                                   cb_toggle,
-	                                   &decal_enabled[GPU_TOTALMEM],
-	                                   _("Show GPU Total Memory"));
+	for (i = GPU_CLOCK; i < GPU_PROPS_NUM; ++i)
+		gkrellm_gtk_check_button_connected(vbox,
+	                                       NULL,
+	                                       decal_info[i].enable,
+	                                       FALSE,
+	                                       FALSE,
+	                                       0,
+	                                       cb_toggle,
+	                                       &decal_info[i].enable,
+	                                       decal_info[i].optionlabel);
 }
 
 static void apply_plugin_config(void)
@@ -650,15 +558,16 @@ static void apply_plugin_config(void)
 
 static void save_plugin_config(FILE *f)
 {
-	fprintf(f, "%s NVML %d %d %d %d %d %d %d %s\n", GK_CONFIG_KEYWORD,
-	                                                decal_enabled[GPU_CLOCK],
-	                                                decal_enabled[GPU_TEMP],
-	                                                decal_enabled[GPU_FAN],
-	                                                decal_enabled[GPU_POWER],
-	                                                decal_enabled[GPU_USAGE],
-												    decal_enabled[GPU_MEMUSAGE],
-	                                                decal_enabled[GPU_MEM],
-	                                                nvml_path);
+	fprintf(f, "%s NVML %d %d %d %d %d %d %d %d %s\n", GK_CONFIG_KEYWORD,
+	                                                   decal_info[GPU_CLOCK].enable,
+	                                                   decal_info[GPU_TEMP].enable,
+	                                                   decal_info[GPU_FAN].enable,
+	                                                   decal_info[GPU_POWER].enable,
+	                                                   decal_info[GPU_USAGE].enable,
+												       decal_info[GPU_MEMUSAGE].enable,
+	                                                   decal_info[GPU_USEDMEM].enable,
+	                                                   decal_info[GPU_TOTALMEM].enable,
+	                                                   nvml_path);
 }
 
 
@@ -672,14 +581,15 @@ static void load_plugin_config(gchar *arg)
 	if (sscanf(arg, "%15s %511[^\n]", config_key, config_line) == 2) {
 	
 		if (!strcmp(config_key, "NVML"))
-			if (sscanf(config_line, "%d %d %d %d %d %d %d %511s", &decal_enabled[GPU_CLOCK],
-			                                                      &decal_enabled[GPU_TEMP],
-			                                                      &decal_enabled[GPU_FAN],
-			                                                      &decal_enabled[GPU_POWER],
-			                                                      &decal_enabled[GPU_USAGE],
-															      &decal_enabled[GPU_MEMUSAGE],
-			                                                      &decal_enabled[GPU_MEM],
-			                                                      nvml_path) == 8)
+			if (sscanf(config_line, "%d %d %d %d %d %d %d %d %511s", &decal_info[GPU_CLOCK].enable,
+			                                                         &decal_info[GPU_TEMP].enable,
+			                                                         &decal_info[GPU_FAN].enable,
+			                                                         &decal_info[GPU_POWER].enable,
+			                                                         &decal_info[GPU_USAGE].enable,
+															         &decal_info[GPU_MEMUSAGE].enable,
+			                                                         &decal_info[GPU_USEDMEM].enable,
+																	 &decal_info[GPU_TOTALMEM].enable,
+			                                                         nvml_path) == 9)
 				read_config_ok = TRUE;
 
 	}
@@ -688,7 +598,7 @@ static void load_plugin_config(gchar *arg)
 		strcpy(nvml_path, GKFREQ_NVML_SONAME);
 
 		for (i = GPU_CLOCK; i < GPU_PROPS_NUM; ++i)
-			decal_enabled[i] = TRUE;
+			decal_info[i].enable = TRUE;
 	}
 }
 
