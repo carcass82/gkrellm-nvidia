@@ -44,8 +44,8 @@ typedef struct nvmlMemory_st {
 } nvmlMemory_t;
 
 typedef struct nvmlUtilization_st {
-	unsigned int gpu;
-	unsigned int memory;
+	guint gpu;
+	guint memory;
 } nvmlUtilization_t;
 
 typedef nvmlReturn_t (*nvmlInit_fn)(void);
@@ -95,7 +95,9 @@ typedef enum GPUProperties_t {
 	GPU_FAN,
 	GPU_POWER,
 	GPU_USAGE,
+	GPU_MEMUSAGE,
 	GPU_MEM,
+	GPU_TOTALMEM,
 	GPU_PROPS_NUM
 } GPUProperties;
 
@@ -112,9 +114,9 @@ typedef struct _GkrellmDecalRow {
 
 static GkrellmDecalRow decal_text[GK_MAX_GPUS * GPU_PROPS_NUM];
 
-static gboolean decal_enabled[GPU_PROPS_NUM] = {TRUE, TRUE, TRUE, TRUE};
+static gboolean decal_enabled[] = { TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE };
 
-static TAlignment decal_align[GPU_PROPS_NUM] = {CENTER, RIGHT, RIGHT, RIGHT};
+static TAlignment decal_align[] = { CENTER, RIGHT, RIGHT, RIGHT, RIGHT, RIGHT, RIGHT, RIGHT, RIGHT };
 
 static char decal_labels[GPU_PROPS_NUM][GK_MAX_TEXT] = {
 	"",
@@ -123,7 +125,9 @@ static char decal_labels[GPU_PROPS_NUM][GK_MAX_TEXT] = {
 	"GPUX Fan",
 	"GPUX Power",
 	"GPUX Usage",
-	"GPUX Mem"
+	"GPUX Memory Usage",
+	"GPUX Memory Usage",
+	"GPUX Total Memory"
 };
 
 static char nvml_path[GK_MAX_PATH] = GKFREQ_NVML_SONAME;
@@ -231,16 +235,17 @@ static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 			break;
 
 		case GPU_USAGE:
+		case GPU_MEMUSAGE:
 			res = nvmlDeviceGetUtilizationRates(device, &utilization);
 			if (res == NVML_SUCCESS)
-				snprintf(buf, buf_size, "%u%%", utilization.gpu);
+				snprintf(buf, buf_size, "%u%%", (info == GPU_USAGE)? utilization.gpu : utilization.memory);
 			break;
 
 		case GPU_MEM:
-			/* in bytes */
+		case GPU_TOTALMEM:
 			res = nvmlDeviceGetMemoryInfo(device, &memInfo);
 			if (res == NVML_SUCCESS)
-				snprintf(buf, buf_size, "%lluMB", memInfo.used / 1024 / 1024);
+				snprintf(buf, buf_size, "%lluMB", ((info == GPU_MEM)? memInfo.used : memInfo.total) / 1024 / 1024);
 			break;
 		}
 
@@ -368,34 +373,42 @@ static void populate_panel(void)
 		y += 5;
 
 		if (decal_enabled[GPU_CLOCK]) {
-			y = create_decal_row(i, GPU_CLOCK, "GPU8 Clock:", "8888MHz", y);
+			y = create_decal_row(i, GPU_CLOCK, decal_labels[GPU_CLOCK], "8888MHz", y);
 			y += 1;
 		}
 
 		if (decal_enabled[GPU_TEMP]) {
-			y = create_decal_row(i, GPU_TEMP, "GPU8 Temp:", "88.8C", y);
+			y = create_decal_row(i, GPU_TEMP, decal_labels[GPU_TEMP], "88.8C", y);
 			y += 1;
 		}
 
 		if (decal_enabled[GPU_FAN]) {
-			y = create_decal_row(i, GPU_FAN, "GPU8 Fan:", "888%", y);
+			y = create_decal_row(i, GPU_FAN, decal_labels[GPU_FAN], "888%", y);
 			y += 1;
 		}
 
 		if (decal_enabled[GPU_POWER]) {
-			y = create_decal_row(i, GPU_POWER, "GPU8 Power:", "888W", y);
+			y = create_decal_row(i, GPU_POWER, decal_labels[GPU_POWER], "888W", y);
 			y += 1;
 		}
 
 		if (decal_enabled[GPU_USAGE]) {
-			y = create_decal_row(i, GPU_USAGE, "GPU8 Usage:", "888%", y);
+			y = create_decal_row(i, GPU_USAGE, decal_labels[GPU_USAGE], "888%", y);
 			y += 1;
 		}
 
 		if (decal_enabled[GPU_MEM]) {
-			y = create_decal_row(i, GPU_MEM, "GPU8 Mem:", "8888MB", y);
+			y = create_decal_row(i, GPU_MEM, decal_labels[GPU_MEM], "8888MB", y);
 			y += 1;
 		}
+
+		if (decal_enabled[GPU_MEMUSAGE]) {
+			y = create_decal_row(i, GPU_MEMUSAGE, decal_labels[GPU_MEMUSAGE], "888%", y);
+			y += 1;
+		}
+
+		if (decal_enabled[GPU_TOTALMEM])
+			y = create_decal_row(i, GPU_TOTALMEM, decal_labels[GPU_TOTALMEM], "8888MB", y);
 
 		y += ((i == system_gpu_count - 1)? 1 : 10);
 	}
@@ -602,7 +615,27 @@ static void create_plugin_tab(GtkWidget* tab_vbox)
 	                                   0,
 	                                   cb_toggle,
 	                                   &decal_enabled[GPU_MEM],
-	                                   _("Show GPU Used Memory"));
+	                                   _("Show GPU Memory Usage"));
+
+	gkrellm_gtk_check_button_connected(vbox,
+	                                   NULL,
+	                                   decal_enabled[GPU_MEMUSAGE],
+	                                   FALSE,
+	                                   FALSE,
+	                                   0,
+	                                   cb_toggle,
+	                                   &decal_enabled[GPU_MEMUSAGE],
+	                                   _("Show GPU Memory Usage (as percentage)"));
+
+	gkrellm_gtk_check_button_connected(vbox,
+	                                   NULL,
+	                                   decal_enabled[GPU_TOTALMEM],
+	                                   FALSE,
+	                                   FALSE,
+	                                   0,
+	                                   cb_toggle,
+	                                   &decal_enabled[GPU_TOTALMEM],
+	                                   _("Show GPU Total Memory"));
 }
 
 static void apply_plugin_config(void)
@@ -617,14 +650,15 @@ static void apply_plugin_config(void)
 
 static void save_plugin_config(FILE *f)
 {
-	fprintf(f, "%s NVML %d %d %d %d %d %d %s\n", GK_CONFIG_KEYWORD,
-	                                             decal_enabled[GPU_CLOCK],
-	                                             decal_enabled[GPU_TEMP],
-	                                             decal_enabled[GPU_FAN],
-	                                             decal_enabled[GPU_POWER],
-					             decal_enabled[GPU_USAGE],
-						     decal_enabled[GPU_MEM],
-	                                             nvml_path);
+	fprintf(f, "%s NVML %d %d %d %d %d %d %d %s\n", GK_CONFIG_KEYWORD,
+	                                                decal_enabled[GPU_CLOCK],
+	                                                decal_enabled[GPU_TEMP],
+	                                                decal_enabled[GPU_FAN],
+	                                                decal_enabled[GPU_POWER],
+	                                                decal_enabled[GPU_USAGE],
+												    decal_enabled[GPU_MEMUSAGE],
+	                                                decal_enabled[GPU_MEM],
+	                                                nvml_path);
 }
 
 
@@ -638,13 +672,14 @@ static void load_plugin_config(gchar *arg)
 	if (sscanf(arg, "%15s %511[^\n]", config_key, config_line) == 2) {
 	
 		if (!strcmp(config_key, "NVML"))
-			if (sscanf(config_line, "%d %d %d %d %d %d %s", &decal_enabled[GPU_CLOCK],
-			                                                &decal_enabled[GPU_TEMP],
-			                                                &decal_enabled[GPU_FAN],
-							                &decal_enabled[GPU_POWER],
-							                &decal_enabled[GPU_USAGE],
-							                &decal_enabled[GPU_MEM],
-			                                                nvml_path) == 4)
+			if (sscanf(config_line, "%d %d %d %d %d %d %d %511s", &decal_enabled[GPU_CLOCK],
+			                                                      &decal_enabled[GPU_TEMP],
+			                                                      &decal_enabled[GPU_FAN],
+			                                                      &decal_enabled[GPU_POWER],
+			                                                      &decal_enabled[GPU_USAGE],
+															      &decal_enabled[GPU_MEMUSAGE],
+			                                                      &decal_enabled[GPU_MEM],
+			                                                      nvml_path) == 8)
 				read_config_ok = TRUE;
 
 	}

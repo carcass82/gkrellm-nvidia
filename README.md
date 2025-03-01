@@ -8,7 +8,7 @@
 ### What is it
 
 A simple [GKrellM](http://gkrellm.srcbox.net/) plugin for reading nvidia GPUs data.
-GPU/Mem usage, Clock, Temperature and Fan Speed for multiple GPU are supported.
+GPU and Memory usages, Power Consumption, Clock, Temperature and Fan Speed for multiple GPU are supported.
 
 ~~XNVCtrl library *is required*~~
 [NVML](https://developer.nvidia.com/nvidia-management-library-nvml) library *is required*
