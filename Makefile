@@ -2,22 +2,25 @@ CFLAGS += -O2 -fpic -Wall -Wextra $(shell pkg-config gkrellm --cflags)
 LDFLAGS += -shared
 INSTALLFLAGS = -m755 -s
 
-SOURCE = nvidia.c
-OBJECT = $(SOURCE:.c=.o)
-TARGET = $(SOURCE:.c=.so)
+SOURCES = nvidia.c nvml-lib.c
+OBJECTS = $(SOURCES:.c=.o)
+TARGET = nvidia.so
 
 GKRELLM = $(shell which gkrellm)
 INSTALL_DIR = /usr/lib/gkrellm2/plugins
 LOCALINSTALL_DIR = $(HOME)/.gkrellm2/plugins
 
+# maximum supported GPUs
+MAX_GPUS := 4
+
 
 all: $(TARGET)
 
-$(TARGET): $(OBJECT)
-	$(CC) $(LDFLAGS) -o $@ $<
+$(TARGET): $(OBJECTS)
+	$(CC) $(LDFLAGS) -o $@ $?
 
 .c.o:
-	$(CC) -c $(CFLAGS) -o $@ $<
+	$(CC) -c $(CFLAGS) -DGK_MAX_GPUS=$(MAX_GPUS) -o $@ $<
 
 .PHONY: install install-local clean test
 
@@ -30,7 +33,7 @@ install-local: $(TARGET)
 	install $(INSTALLFLAGS) $(TARGET) $(DESTDIR)$(LOCALINSTALL_DIR)
 
 clean:
-	rm -rf $(OBJECT) $(TARGET)
+	rm -rf $(OBJECTS) $(TARGET)
 
 # start gkrellm in plugin-test mode
 # (needs gkrellm executable in PATH)
