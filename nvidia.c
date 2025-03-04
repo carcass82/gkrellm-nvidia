@@ -19,7 +19,6 @@
  *                                                                           *
  *****************************************************************************/
 #include <gkrellm2/gkrellm.h>
-#include <dlfcn.h>
 #include "nvml-lib.h"
 
 #define GK_PLUGIN_NAME "nvidia"
@@ -39,10 +38,17 @@ static GKNVMLLib nvml;
  #define GKFREQ_NVML_SONAME "libnvidia-ml.so"
 #endif
 
-static GtkWidget *plugin_vbox = NULL;
-static GkrellmMonitor* monitor = NULL;
-static GkrellmPanel* panel = NULL;
-static int style_id = 0;
+#define NVCHECK(fn) (fn == NVML_SUCCESS)
+
+typedef struct _GKNvidia {
+	GtkWidget *main_vbox;
+	GkrellmMonitor* monitor;
+	GkrellmPanel* panel;
+	int style_id;
+} GKNvidia;
+
+static GKNvidia plugin;
+
 static int system_gpu_count = 0;
 static gboolean needs_reinitialization = FALSE;
 
@@ -74,7 +80,7 @@ typedef struct _GkrellmDecalRowInfo {
 
 static GkrellmDecalRowInfo_t decal_info[] = {
 	{ TRUE, CENTER, "",                ""                                    },
-	{ TRUE, RIGHT,  _("Utilization"),  _("GPU Utilization")                  },
+	{ TRUE, RIGHT,  _("Load"),         _("GPU Load")                         },
 	{ TRUE, RIGHT,  _("Clock"),        _("GPU Clock")                        },
 	{ TRUE, RIGHT,  _("Temp"),         _("GPU Temperature")                  },
 	{ TRUE, RIGHT,  _("Fan"),          _("GPU Fan Speed")                    },
@@ -102,9 +108,9 @@ static void update_gpu_count(void)
 	system_gpu_count = res? MIN(GK_MAX_GPUS, gpu_count) : 0;
 }
 
-static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
+static gboolean get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 {
-	nvmlReturn_t res = NVML_ERROR_UNKNOWN;
+	gboolean res = FALSE;
 	guint attr = -1;
 	nvmlDevice_t device;
 	nvmlUsage_t utilization;
@@ -112,64 +118,63 @@ static int get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 
 	if (nvml.nvmlDeviceGetHandleByIndex(gpu_id, &device) == NVML_SUCCESS) {
 
-		switch (info)
-		{
+		switch (info) {
 		case GPU_NAME:
-			res = nvml.nvmlDeviceGetName(device, buf, buf_size);
+			res = NVCHECK(nvml.nvmlDeviceGetName(device, buf, buf_size));
 			break;
 
 		case GPU_CLOCK:
-			res = nvml.nvmlDeviceGetClockInfo(device, NVML_CLOCK_GRAPHICS, &attr);
-			if (res == NVML_SUCCESS)
+			res = NVCHECK(nvml.nvmlDeviceGetClockInfo(device, NVML_CLOCK_GRAPHICS, &attr));
+			if (res)
 				snprintf(buf, buf_size, "%uMHz", attr);
 			break;
 
 		case GPU_TEMP:
-			res = nvml.nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU, &attr);
-			if (res == NVML_SUCCESS)
-				snprintf(buf, buf_size, "%.1fC", (float)attr);
+			res = NVCHECK(nvml.nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU, &attr));
+			if (res)
+				snprintf(buf, buf_size, "%.01fC", (float)attr);
 			break;
 
 		case GPU_FAN:
-			res = nvml.nvmlDeviceGetFanSpeed(device, &attr);
-			if (res == NVML_SUCCESS)
+			res = NVCHECK(nvml.nvmlDeviceGetFanSpeed(device, &attr));
+			if (res)
 				snprintf(buf, buf_size, "%d%%", CLAMP(attr, 0, 100));
 			break;
 
 		case GPU_POWER:
-			res = nvml.nvmlDeviceGetPowerUsage(device, &attr);
-			if (res == NVML_SUCCESS)
+			res = NVCHECK(nvml.nvmlDeviceGetPowerUsage(device, &attr));
+			if (res)
 				snprintf(buf, buf_size, "%.02fW", attr / 1000.f);
 			break;
 
 		case GPU_USAGE:
 		case GPU_MEMUSAGE:
-			res = nvml.nvmlDeviceGetUtilizationRates(device, &utilization);
-			if (res == NVML_SUCCESS)
+			res = NVCHECK(nvml.nvmlDeviceGetUtilizationRates(device, &utilization));
+			if (res)
 				snprintf(buf, buf_size, "%u%%", (info == GPU_USAGE)? utilization.gpu : utilization.memory);
 			break;
 
 		case GPU_USEDMEM:
 		case GPU_TOTALMEM:
-			res = nvml.nvmlDeviceGetMemoryInfo(device, &memInfo);
-			if (res == NVML_SUCCESS)
+			res = NVCHECK(nvml.nvmlDeviceGetMemoryInfo(device, &memInfo));
+			if (res)
 				snprintf(buf, buf_size, "%lluMB", ((info == GPU_USEDMEM)? memInfo.used : memInfo.total) / 1024 / 1024);
 			break;
 		}
 
 	}
 
-	if (res != NVML_SUCCESS)
+	if (!res)
 		strcpy(buf, "N/A");
 
-	return (res == NVML_SUCCESS)? 0 : -1;
+	return res;
 }
 
 static gint panel_expose_event(GtkWidget* widget, GdkEventExpose* ev)
 {
 	gdk_draw_pixmap(widget->window,
 	                widget->style->fg_gc[GTK_WIDGET_STATE(widget)],
-	                panel->pixmap,
+	                plugin.panel->pixmap,
 	                ev->area.x,
 	                ev->area.y,
 	                ev->area.x,
@@ -186,12 +191,12 @@ static void panel_click_event(GtkWidget *w, GdkEventButton *event, gpointer p)
 	UNUSED(p);
 
     if (event->button == 3)
-        gkrellm_open_config_window(monitor);
+        gkrellm_open_config_window(plugin.monitor);
 }
 
 static void update_plugin(void)
 {
-	GkrellmStyle *style = gkrellm_panel_style(style_id);
+	GkrellmStyle *style = gkrellm_panel_style(plugin.style_id);
 	GkrellmMargin *m = gkrellm_get_style_margins(style);
 	GkrellmDecal *d;
 	int w = gkrellm_chart_width();
@@ -208,7 +213,7 @@ static void update_plugin(void)
 
 			if (decal_info[p].enable && d != NULL) {
 
-				gkrellm_draw_decal_text(panel, d, decal_info[p].label, 0);
+				gkrellm_draw_decal_text(plugin.panel, d, decal_info[p].label, 0);
 
 				get_gpu_data(i, p, temp_string, GK_MAX_TEXT);
 				
@@ -231,7 +236,7 @@ static void update_plugin(void)
 					break;
 				}
 
-				gkrellm_draw_decal_text(panel,
+				gkrellm_draw_decal_text(plugin.panel,
 				                        decal_text[idx + p].data,
 				                        temp_string,
 				                        0);
@@ -240,17 +245,17 @@ static void update_plugin(void)
 		}
 	}
 
-	gkrellm_draw_panel_layers(panel);
+	gkrellm_draw_panel_layers(plugin.panel);
 }
 
 static int
 create_decal_row(int i, GPUProperty_t offset, gchar* label, gchar* text, int y)
 {
-	GkrellmStyle *style = gkrellm_meter_style(style_id);
-	GkrellmTextstyle *ts = gkrellm_meter_textstyle(style_id);
+	GkrellmStyle *style = gkrellm_meter_style(plugin.style_id);
+	GkrellmTextstyle *ts = gkrellm_meter_textstyle(plugin.style_id);
 	int idx = i * GPU_PROPS_NUM + offset;
 
-	decal_text[idx].label = gkrellm_create_decal_text(panel,
+	decal_text[idx].label = gkrellm_create_decal_text(plugin.panel,
 	                                                  label,
 	                                                  ts,
 	                                                  style,
@@ -258,7 +263,7 @@ create_decal_row(int i, GPUProperty_t offset, gchar* label, gchar* text, int y)
 	                                                  y,
 	                                                  -1);
 	
-	decal_text[idx].data = gkrellm_create_decal_text(panel,
+	decal_text[idx].data = gkrellm_create_decal_text(plugin.panel,
 	                                                 text,
 	                                                 ts,
 	                                                 style,
@@ -292,28 +297,28 @@ static void populate_panel(void)
 
 static void destroy_nv_panel()
 {
-	gkrellm_panel_destroy(panel);
-	panel = NULL;
+	gkrellm_panel_destroy(plugin.panel);
+	plugin.panel = NULL;
 }
 
 static void create_nv_panel(gint first_create)
 {
-	if (!panel)
-		panel = gkrellm_panel_new0();
+	if (!plugin.panel)
+		plugin.panel = gkrellm_panel_new0();
 
 	populate_panel();
 
-	gkrellm_panel_configure(panel, NULL, gkrellm_meter_style(style_id));
+	gkrellm_panel_configure(plugin.panel, NULL, gkrellm_meter_style(plugin.style_id));
 	
-	gkrellm_panel_create(plugin_vbox, monitor, panel);
+	gkrellm_panel_create(plugin.main_vbox, plugin.monitor, plugin.panel);
 
 	if (first_create) {
-		g_signal_connect(G_OBJECT(panel->drawing_area),
+		g_signal_connect(G_OBJECT(plugin.panel->drawing_area),
 		                 "expose_event",
 		                 G_CALLBACK(panel_expose_event),
 		                 NULL);
 		
-		g_signal_connect(G_OBJECT(panel->drawing_area),
+		g_signal_connect(G_OBJECT(plugin.panel->drawing_area),
 		                 "button_press_event",
 		                 G_CALLBACK(panel_click_event),
 		                 NULL);
@@ -326,18 +331,23 @@ static void rebuild_nv_panel()
 	create_nv_panel(TRUE);
 }
 
+static void shutdown_plugin()
+{
+	shutdown_gpulib(&nvml);
+}
+
 static void create_plugin(GtkWidget* vbox, gint first_create)
 {
 	if (first_create) {
-		plugin_vbox = gtk_vbox_new(FALSE, 0);
-		gtk_box_pack_start(GTK_BOX(vbox), plugin_vbox, FALSE, FALSE, 0);
-		gtk_widget_show(plugin_vbox);
+		plugin.main_vbox = gtk_vbox_new(FALSE, 0);
+		gtk_box_pack_start(GTK_BOX(vbox), plugin.main_vbox, FALSE, FALSE, 0);
+		gtk_widget_show(plugin.main_vbox);
 	}
 
 	if (initialize_gpulib(&nvml))
 			update_gpu_count();
 
-	gkrellm_disable_plugin_connect(monitor, shutdown_gpulib);
+	gkrellm_disable_plugin_connect(plugin.monitor, shutdown_plugin);
 
 	create_nv_panel(first_create);
 }
@@ -526,8 +536,10 @@ static GkrellmMonitor plugin_mon =
 
 GkrellmMonitor* gkrellm_init_plugin(void)
 {
-	style_id = gkrellm_add_meter_style(&plugin_mon, GK_PLUGIN_NAME);
-	monitor = &plugin_mon;
+	plugin.panel = NULL;
+	plugin.main_vbox = NULL;
+	plugin.style_id = gkrellm_add_meter_style(&plugin_mon, GK_PLUGIN_NAME);
+	plugin.monitor = &plugin_mon;
 
-	return monitor;
+	return plugin.monitor;
 }
