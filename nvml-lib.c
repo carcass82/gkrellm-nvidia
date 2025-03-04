@@ -31,23 +31,22 @@
  #define NULL (0)
 #endif
 
-#define NVCHECK(fn) (fn == NVML_SUCCESS)
-
-void shutdown_gpulib(GKNVMLLib* lib)
+void shutdown_gpulib(GKNVMLLib *lib)
 {
-	if (lib && lib->handle && lib->nvmlShutdown)
+	if (is_valid_gpulib(lib) && lib->nvmlShutdown)
 	{
 		lib->nvmlShutdown();
 		dlclose(lib->handle);
 		
         lib->handle = NULL;
+		lib->valid = FALSE;
 	}
 }
 
-boolean is_valid_gpulib_path(char* path)
+boolean is_valid_gpulib_path(char *path)
 {
 	boolean res = FALSE;
-	void* tmp_handle = NULL;
+	void *tmp_handle = NULL;
 	nvmlInit_fn tmp_fn = NULL;
 	static const char INIT_FN_NAME[] = "nvmlInit";
 
@@ -61,39 +60,48 @@ boolean is_valid_gpulib_path(char* path)
 	return res;
 }
 
-boolean is_valid_gpulib(GKNVMLLib* lib)
+boolean is_valid_gpulib(GKNVMLLib *lib)
 {
-	return lib && lib->handle;
+	return lib && lib->handle && lib->valid;
 }
 
-boolean initialize_gpulib(GKNVMLLib* lib)
+boolean initialize_gpulib(GKNVMLLib *lib)
 {
 	boolean res = FALSE;
 
-	lib->handle = dlopen(lib->path, RTLD_LAZY);
-	if (lib->handle)
-	{
-        #define BIND_FUNCTION(fun) fun = (fun ## _fn)dlsym(lib->handle, #fun)
-		lib->BIND_FUNCTION(nvmlInit);
-		lib->BIND_FUNCTION(nvmlShutdown);
-		lib->BIND_FUNCTION(nvmlDeviceGetCount);
-		lib->BIND_FUNCTION(nvmlDeviceGetHandleByIndex);
-		lib->BIND_FUNCTION(nvmlDeviceGetName);
-		lib->BIND_FUNCTION(nvmlDeviceGetClockInfo);
-		lib->BIND_FUNCTION(nvmlDeviceGetTemperature);
-		lib->BIND_FUNCTION(nvmlDeviceGetFanSpeed);
-		lib->BIND_FUNCTION(nvmlDeviceGetPowerUsage);
-		lib->BIND_FUNCTION(nvmlDeviceGetUtilizationRates);
-		lib->BIND_FUNCTION(nvmlDeviceGetMemoryInfo);
-        #undef BIND_FUNCTION
+	if (lib && is_valid_gpulib_path(lib->path)) {
+		
+		lib->handle = dlopen(lib->path, RTLD_LAZY);
+		if (lib->handle)
+		{
 
-		res = (dlerror() == NULL && NVCHECK(lib->nvmlInit()));
+#define BIND_FUNCTION(fun) fun = (fun ## _fn)dlsym(lib->handle, #fun)
+
+			lib->BIND_FUNCTION(nvmlInit);
+			lib->BIND_FUNCTION(nvmlShutdown);
+			lib->BIND_FUNCTION(nvmlDeviceGetCount);
+			lib->BIND_FUNCTION(nvmlDeviceGetHandleByIndex);
+			lib->BIND_FUNCTION(nvmlDeviceGetName);
+			lib->BIND_FUNCTION(nvmlDeviceGetClockInfo);
+			lib->BIND_FUNCTION(nvmlDeviceGetTemperature);
+			lib->BIND_FUNCTION(nvmlDeviceGetFanSpeed);
+			lib->BIND_FUNCTION(nvmlDeviceGetPowerUsage);
+			lib->BIND_FUNCTION(nvmlDeviceGetUtilizationRates);
+			lib->BIND_FUNCTION(nvmlDeviceGetMemoryInfo);
+			lib->BIND_FUNCTION(nvmlDeviceGetPciInfo);
+
+#undef BIND_FUNCTION
+
+			res = (dlerror() == NULL && lib->nvmlInit() == NVML_SUCCESS);
+		}
+
+		lib->valid = res;
 	}
 
 	return res;
 }
 
-boolean reinitialize_gpulib(GKNVMLLib* lib)
+boolean reinitialize_gpulib(GKNVMLLib *lib)
 {
 	shutdown_gpulib(lib);
 	return initialize_gpulib(lib);

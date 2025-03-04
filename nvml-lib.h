@@ -39,6 +39,11 @@ typedef struct nvmlUsage_st {
 	uint memory;
 } nvmlUsage_t;
 
+typedef struct nvmlPciInfo_st {
+	char busId[16];
+	uint unused[9];
+} nvmlPciInfo_t;
+
 #define DECLARE_FUNCTION(f, ...) typedef nvmlReturn_t (*f ## _fn)(__VA_ARGS__)
 DECLARE_FUNCTION(nvmlInit, void);
 DECLARE_FUNCTION(nvmlShutdown, void);
@@ -51,11 +56,13 @@ DECLARE_FUNCTION(nvmlDeviceGetFanSpeed, nvmlDevice_t, uint*);
 DECLARE_FUNCTION(nvmlDeviceGetPowerUsage, nvmlDevice_t, uint*);
 DECLARE_FUNCTION(nvmlDeviceGetUtilizationRates, nvmlDevice_t, nvmlUsage_t*);
 DECLARE_FUNCTION(nvmlDeviceGetMemoryInfo, nvmlDevice_t, nvmlMemory_t*);
+DECLARE_FUNCTION(nvmlDeviceGetPciInfo, nvmlDevice_t, nvmlPciInfo_t*);
 #undef DECLARE_FUNCTION
 
 typedef struct _GKNVMLLib {
 	char path[512];
 	void *handle;
+	boolean valid;
 
 	nvmlInit_fn nvmlInit;
 	nvmlShutdown_fn nvmlShutdown;
@@ -68,11 +75,12 @@ typedef struct _GKNVMLLib {
 	nvmlDeviceGetPowerUsage_fn nvmlDeviceGetPowerUsage;
 	nvmlDeviceGetUtilizationRates_fn nvmlDeviceGetUtilizationRates;
 	nvmlDeviceGetMemoryInfo_fn nvmlDeviceGetMemoryInfo;
+	nvmlDeviceGetPciInfo_fn nvmlDeviceGetPciInfo;
 
 } GKNVMLLib;
 
-boolean initialize_gpulib(GKNVMLLib* lib);
-boolean reinitialize_gpulib(GKNVMLLib* lib);
-void shutdown_gpulib(GKNVMLLib* lib);
-boolean is_valid_gpulib(GKNVMLLib* lib);
-boolean is_valid_gpulib_path(char* path);
+boolean initialize_gpulib(GKNVMLLib *lib);
+boolean reinitialize_gpulib(GKNVMLLib *lib);
+void shutdown_gpulib(GKNVMLLib *lib);
+boolean is_valid_gpulib(GKNVMLLib *lib);
+boolean is_valid_gpulib_path(char *path);

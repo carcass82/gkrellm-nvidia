@@ -30,15 +30,16 @@
  #define GK_MAX_GPUS 4
 #endif
 
-#define UNUSED(x) (void)(x)
-
 static GKNVMLLib nvml;
+static gboolean reset_lib = FALSE;
 
 #ifndef GKFREQ_NVML_SONAME
  #define GKFREQ_NVML_SONAME "libnvidia-ml.so"
 #endif
 
-#define NVCHECK(fn) (fn == NVML_SUCCESS)
+#define NVCHECK(fn) (nvml.fn == NVML_SUCCESS)
+#define B2MB(b) (b / 1024 / 1024)
+#define UNUSED(x) (void)(x)
 
 typedef struct _GKNvidia {
 	GtkWidget *main_vbox;
@@ -48,9 +49,6 @@ typedef struct _GKNvidia {
 } GKNvidia;
 
 static GKNvidia plugin;
-
-static int system_gpu_count = 0;
-static gboolean needs_reinitialization = FALSE;
 
 typedef enum _TextAlignment {
 	RIGHT,
@@ -97,68 +95,89 @@ typedef struct _GkrellmDecalRow {
 
 static GkrellmDecalRow_t decal_text[GK_MAX_GPUS * GPU_PROPS_NUM];
 
-static void update_gpu_count(void)
+typedef struct _NVGpuInfo {
+	gboolean enable;
+	char deviceName[GK_MAX_TEXT];
+	nvmlDevice_t device;
+	nvmlPciInfo_t pciInfo;
+} NVGpuInfo;
+
+static NVGpuInfo gpu_info[GK_MAX_GPUS];
+
+static void update_gpu_info(void)
 {
-	nvmlReturn_t res;
-	guint gpu_count;
+	guint i, gpu_count;
 
-	res = nvml.nvmlDeviceGetCount &&
-	      (nvml.nvmlDeviceGetCount(&gpu_count) == NVML_SUCCESS);
+	for (i = 0; i < GK_MAX_GPUS; ++i)
+		gpu_info[i].enable = FALSE;
 
-	system_gpu_count = res? MIN(GK_MAX_GPUS, gpu_count) : 0;
+	if (NVCHECK(nvmlDeviceGetCount(&gpu_count)))
+		if (CLAMP(gpu_count, 0, GK_MAX_GPUS) > 0)
+			for (i = 0; i < gpu_count; ++i) {
+				NVGpuInfo* gpu = &gpu_info[i];
+				gpu->enable =
+					NVCHECK(nvmlDeviceGetHandleByIndex(i, &gpu_info[i].device)) &&
+				    NVCHECK(nvmlDeviceGetName(gpu->device, gpu->deviceName, GK_MAX_TEXT)) &&
+				    NVCHECK(nvmlDeviceGetPciInfo(gpu->device, &(gpu->pciInfo)));
+			}
 }
 
 static gboolean get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 {
 	gboolean res = FALSE;
 	guint attr = -1;
-	nvmlDevice_t device;
 	nvmlUsage_t utilization;
 	nvmlMemory_t memInfo;
+	nvmlDevice_t device;
 
-	if (nvml.nvmlDeviceGetHandleByIndex(gpu_id, &device) == NVML_SUCCESS) {
+	if (gpu_info[gpu_id].enable) {
+
+		device = gpu_info[gpu_id].device;
 
 		switch (info) {
 		case GPU_NAME:
-			res = NVCHECK(nvml.nvmlDeviceGetName(device, buf, buf_size));
+			strcpy(buf, gpu_info[gpu_id].deviceName);
+			res = TRUE;
 			break;
 
 		case GPU_CLOCK:
-			res = NVCHECK(nvml.nvmlDeviceGetClockInfo(device, NVML_CLOCK_GRAPHICS, &attr));
+			res = NVCHECK(nvmlDeviceGetClockInfo(device, NVML_CLOCK_GRAPHICS, &attr));
 			if (res)
 				snprintf(buf, buf_size, "%uMHz", attr);
 			break;
 
 		case GPU_TEMP:
-			res = NVCHECK(nvml.nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU, &attr));
+			res = NVCHECK(nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU, &attr));
 			if (res)
 				snprintf(buf, buf_size, "%.01fC", (float)attr);
 			break;
 
 		case GPU_FAN:
-			res = NVCHECK(nvml.nvmlDeviceGetFanSpeed(device, &attr));
+			res = NVCHECK(nvmlDeviceGetFanSpeed(device, &attr));
 			if (res)
 				snprintf(buf, buf_size, "%d%%", CLAMP(attr, 0, 100));
 			break;
 
 		case GPU_POWER:
-			res = NVCHECK(nvml.nvmlDeviceGetPowerUsage(device, &attr));
+			res = NVCHECK(nvmlDeviceGetPowerUsage(device, &attr));
 			if (res)
 				snprintf(buf, buf_size, "%.02fW", attr / 1000.f);
 			break;
 
 		case GPU_USAGE:
 		case GPU_MEMUSAGE:
-			res = NVCHECK(nvml.nvmlDeviceGetUtilizationRates(device, &utilization));
+			res = NVCHECK(nvmlDeviceGetUtilizationRates(device, &utilization));
 			if (res)
-				snprintf(buf, buf_size, "%u%%", (info == GPU_USAGE)? utilization.gpu : utilization.memory);
+				snprintf(buf, buf_size, "%u%%", (info == GPU_USAGE? utilization.gpu :
+				                                                    utilization.memory));
 			break;
 
 		case GPU_USEDMEM:
 		case GPU_TOTALMEM:
-			res = NVCHECK(nvml.nvmlDeviceGetMemoryInfo(device, &memInfo));
+			res = NVCHECK(nvmlDeviceGetMemoryInfo(device, &memInfo));
 			if (res)
-				snprintf(buf, buf_size, "%lluMB", ((info == GPU_USEDMEM)? memInfo.used : memInfo.total) / 1024 / 1024);
+				snprintf(buf, buf_size, "%lluMB", B2MB((info == GPU_USEDMEM? memInfo.used :
+				                                                             memInfo.total)));
 			break;
 		}
 
@@ -203,7 +222,10 @@ static void update_plugin(void)
 	int w_text, i, p, idx;
 	static char temp_string[GK_MAX_TEXT] = "N/A";
 
-	for (i = 0; i < system_gpu_count; ++i) {
+	for (i = 0; i < GK_MAX_GPUS; ++i) {
+
+		if (gpu_info[i].enable == FALSE)
+			continue;
 
 		idx = i * GPU_PROPS_NUM;
 
@@ -279,7 +301,10 @@ static void populate_panel(void)
 {
 	int i, j, y;
 	
-	for (y = -1, i = 0; i < system_gpu_count; ++i) {
+	for (y = -1, i = 0; i < GK_MAX_GPUS; ++i) {
+
+		if (gpu_info[i].enable == FALSE)
+			continue;
 
 		for (j = GPU_NAME; j < GPU_PROPS_NUM; ++j) {
 
@@ -289,9 +314,6 @@ static void populate_panel(void)
 			}
 
 		}
-		
-		y += ((i == system_gpu_count - 1)? 1 : 10);
-	
 	}
 }
 
@@ -308,7 +330,9 @@ static void create_nv_panel(gint first_create)
 
 	populate_panel();
 
-	gkrellm_panel_configure(plugin.panel, NULL, gkrellm_meter_style(plugin.style_id));
+	gkrellm_panel_configure(plugin.panel,
+	                        NULL,
+	                        gkrellm_meter_style(plugin.style_id));
 	
 	gkrellm_panel_create(plugin.main_vbox, plugin.monitor, plugin.panel);
 
@@ -345,7 +369,7 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 	}
 
 	if (initialize_gpulib(&nvml))
-			update_gpu_count();
+			update_gpu_info();
 
 	gkrellm_disable_plugin_connect(plugin.monitor, shutdown_plugin);
 
@@ -384,7 +408,7 @@ static void cb_pathchanged(GtkWidget* widget, gpointer data)
 
 	g_object_unref(valid_icon);
 
-	needs_reinitialization = valid_path;
+	reset_lib = valid_path;
 	if (valid_path)
 		strcpy(nvml.path, text);
 }
@@ -458,11 +482,11 @@ static void create_plugin_tab(GtkWidget* tab_vbox)
 
 static void apply_plugin_config(void)
 {
-	if (needs_reinitialization) {
+	if (reset_lib) {
 		if (reinitialize_gpulib(&nvml))
-			update_gpu_count();
+			update_gpu_info();
 		rebuild_nv_panel();
-		needs_reinitialization = FALSE;
+		reset_lib = FALSE;
 	}
 }
 
