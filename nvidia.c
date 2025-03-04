@@ -375,7 +375,7 @@ static void cb_pathchanged(GtkWidget* widget, gpointer data)
 
 	gkrellm_dup_string(&text, gkrellm_gtk_entry_get_text(&widget));
 
-	valid_path = is_valid_gpulib(text);
+	valid_path = is_valid_gpulib_path(text);
 	valid_icon = g_themed_icon_new(valid_path? ICON_OK : ICON_KO);
 
 	gtk_entry_set_icon_from_gicon(GTK_ENTRY(widget),

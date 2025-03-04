@@ -56,7 +56,6 @@ DECLARE_FUNCTION(nvmlDeviceGetMemoryInfo, nvmlDevice_t, nvmlMemory_t*);
 typedef struct _GKNVMLLib {
 	char path[512];
 	void *handle;
-    boolean initialized;
 
 	nvmlInit_fn nvmlInit;
 	nvmlShutdown_fn nvmlShutdown;
@@ -75,4 +74,5 @@ typedef struct _GKNVMLLib {
 boolean initialize_gpulib(GKNVMLLib* lib);
 boolean reinitialize_gpulib(GKNVMLLib* lib);
 void shutdown_gpulib(GKNVMLLib* lib);
-boolean is_valid_gpulib(char* path);
+boolean is_valid_gpulib(GKNVMLLib* lib);
+boolean is_valid_gpulib_path(char* path);

@@ -19,7 +19,6 @@
  *                                                                           *
  *****************************************************************************/
 #include "nvml-lib.h"
-#include <string.h>
 #include <dlfcn.h>
 
 #ifndef	FALSE
@@ -27,6 +26,9 @@
 #endif
 #ifndef	TRUE
  #define TRUE (!FALSE)
+#endif
+#ifndef	NULL
+ #define NULL (0)
 #endif
 
 #define NVCHECK(fn) (fn == NVML_SUCCESS)
@@ -42,15 +44,26 @@ void shutdown_gpulib(GKNVMLLib* lib)
 	}
 }
 
-boolean is_valid_gpulib(char* path)
+boolean is_valid_gpulib_path(char* path)
 {
-	void* temp_handle = NULL;
-	nvmlInit_fn temp_fn = NULL;
+	boolean res = FALSE;
+	void* tmp_handle = NULL;
+	nvmlInit_fn tmp_fn = NULL;
+	static const char INIT_FN_NAME[] = "nvmlInit";
 
-	temp_handle = (strlen(path) > 0)? dlopen(path, RTLD_LAZY) : NULL;
-	temp_fn = (temp_handle != NULL)? (nvmlInit_fn)dlsym(temp_handle, "nvmlInit") : NULL;
+	tmp_handle = (path && path[0] != '\0')? dlopen(path, RTLD_LAZY) : NULL;
+	tmp_fn = (tmp_handle)? (nvmlInit_fn)dlsym(tmp_handle, INIT_FN_NAME) : NULL;
+	res = (tmp_fn != NULL && dlerror() == NULL);
+	
+	if (tmp_handle)
+		dlclose(tmp_handle);
 
-	return (temp_fn != NULL && dlerror() == NULL);
+	return res;
+}
+
+boolean is_valid_gpulib(GKNVMLLib* lib)
+{
+	return lib && lib->handle;
 }
 
 boolean initialize_gpulib(GKNVMLLib* lib)
@@ -74,7 +87,7 @@ boolean initialize_gpulib(GKNVMLLib* lib)
 		lib->BIND_FUNCTION(nvmlDeviceGetMemoryInfo);
         #undef BIND_FUNCTION
 
-		lib->initialized = res = (dlerror() == NULL && NVCHECK(lib->nvmlInit()));
+		res = (dlerror() == NULL && NVCHECK(lib->nvmlInit()));
 	}
 
 	return res;
