@@ -3,7 +3,7 @@
 ![release](https://img.shields.io/github/v/release/carcass82/gkrellm-nvidia)
 ![license](https://img.shields.io/github/license/carcass82/gkrellm-nvidia)
 ![build status](https://github.com/carcass82/gkrellm-nvidia/actions/workflows/build-action.yml/badge.svg)
-![code review](https://img.shields.io/codefactor/grade/github/carcass82/gkrellm-nvidia)
+[![code review](https://img.shields.io/codefactor/grade/github/carcass82/gkrellm-nvidia)](https://www.codefactor.io/repository/github/carcass82/gkrellm-nvidia)
 
 ### What is it
 
