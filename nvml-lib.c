@@ -38,7 +38,7 @@ void shutdown_gpulib(GKNVMLLib *lib)
 		lib->nvmlShutdown();
 		dlclose(lib->handle);
 		
-        lib->handle = NULL;
+		lib->handle = NULL;
 		lib->valid = FALSE;
 	}
 }
