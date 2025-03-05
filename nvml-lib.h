@@ -76,7 +76,6 @@ typedef struct _GKNVMLLib {
 	nvmlDeviceGetUtilizationRates_fn nvmlDeviceGetUtilizationRates;
 	nvmlDeviceGetMemoryInfo_fn nvmlDeviceGetMemoryInfo;
 	nvmlDeviceGetPciInfo_fn nvmlDeviceGetPciInfo;
-
 } GKNVMLLib;
 
 boolean initialize_gpulib(GKNVMLLib *lib);
