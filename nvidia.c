@@ -514,13 +514,13 @@ gkrellm_gtk_entry_connected(GtkWidget *box, GtkWidget **entry, gchar *text,
 static void create_plugin_tab(GtkWidget *tab_vbox)
 {
 	int i;
-	GtkWidget *tabs, *vbox;
+	GtkWidget *tabs, *vbox, *cntvbox;
 	
 	tabs = gtk_notebook_new();
 	gtk_notebook_set_tab_pos(GTK_NOTEBOOK(tabs), GTK_POS_TOP);
 	gtk_box_pack_start(GTK_BOX(tab_vbox), tabs, TRUE, TRUE, 0);
 
-	vbox = gkrellm_gtk_framed_notebook_page(tabs, _("Options"));
+	vbox = gkrellm_gtk_framed_notebook_page(tabs, _(" Options "));
 	
 	gkrellm_gtk_entry_connected(vbox,
 	                            NULL,
@@ -532,8 +532,10 @@ static void create_plugin_tab(GtkWidget *tab_vbox)
 	                            NULL,
 	                            _("libNVML path"));
 
+	cntvbox = gkrellm_gtk_framed_vbox(vbox, _(" Counters "), 2, TRUE, 4, 4);
+
 	for (i = GPU_NAME + 1; i < GPU_PROPS_NUM; ++i)
-		gkrellm_gtk_check_button_connected(vbox,
+		gkrellm_gtk_check_button_connected(cntvbox,
 		                                   NULL,
 		                                   decal_info[i].enable,
 		                                   FALSE,
