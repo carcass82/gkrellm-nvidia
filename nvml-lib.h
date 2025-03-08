@@ -23,7 +23,7 @@ typedef unsigned int uint;
 typedef unsigned long long uint64;
 
 typedef enum { NVML_SUCCESS, NVML_ERROR_UNKNOWN = 999 } nvmlReturn_t;
-typedef enum { NVML_CLOCK_GFX } nvmlClockType_t;
+typedef enum { NVML_CLOCK_GFX, NVML_CLOCK_MEM = 2 } nvmlClockType_t;
 typedef enum { NVML_TEMP_GPU } nvmlSensors_t;
 
 typedef void* nvmlDevice_t;

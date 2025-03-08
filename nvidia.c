@@ -66,6 +66,7 @@ typedef enum _GPUProperty {
 	GPU_NAME,
 	GPU_USAGE,
 	GPU_CLOCK,
+	GPU_MEMCLOCK,
 	GPU_TEMP,
 	GPU_FAN,
 	GPU_POWER,
@@ -87,12 +88,13 @@ static GkrellmDecalRowInfo_t decal_info[] = {
 	{ TRUE, 0, CENTER, "",                ""                                },
 	{ TRUE, 1, RIGHT,  _("Load"),         _("GPU Load")                     },
 	{ TRUE, 2, RIGHT,  _("Clock"),        _("GPU Clock")                    },
-	{ TRUE, 3, RIGHT,  _("Temp"),         _("GPU Temperature")              },
-	{ TRUE, 4, RIGHT,  _("Fan"),          _("GPU Fan Speed")                },
-	{ TRUE, 5, RIGHT,  _("Power"),        _("GPU Power Draw")               },
-	{ TRUE, 6, RIGHT,  _("Used Memory"),  _("GPU Used Memory (percentage)") },
-	{ TRUE, 7, RIGHT,  _("Used Memory"),  _("GPU Used Memory")              },
-	{ TRUE, 8, RIGHT,  _("Total Memory"), _("GPU Total Memory")             } 
+	{ TRUE, 3, RIGHT,  _("Memory Clock"), _("GPU Memory Clock")             },
+	{ TRUE, 4, RIGHT,  _("Temp"),         _("GPU Temperature")              },
+	{ TRUE, 5, RIGHT,  _("Fan"),          _("GPU Fan Speed")                },
+	{ TRUE, 6, RIGHT,  _("Power"),        _("GPU Power Draw")               },
+	{ TRUE, 7, RIGHT,  _("Used Memory"),  _("GPU Used Memory (percentage)") },
+	{ TRUE, 8, RIGHT,  _("Used Memory"),  _("GPU Used Memory")              },
+	{ TRUE, 9, RIGHT,  _("Total Memory"), _("GPU Total Memory")             } 
 };
 
 typedef struct _GkrellmDecalRow {
@@ -110,6 +112,7 @@ typedef struct _NVGpuInfo {
 	nvmlDevice_t h;
 	nvmlPciInfo_t pci;
 	guint clock;
+	guint memclock;
 	guint temp;
 	guint fan;
 	guint pwr;
@@ -150,6 +153,10 @@ static void update_gpu_data(void)
 		if (!decal_info[GPU_CLOCK].enable ||
 			!_NV(nvmlDeviceGetClockInfo(g->h, NVML_CLOCK_GFX, &(g->clock))))
 			g->clock = INVALID_PROP;
+
+		if (!decal_info[GPU_CLOCK].enable ||
+			!_NV(nvmlDeviceGetClockInfo(g->h, NVML_CLOCK_MEM, &(g->memclock))))
+			g->memclock = INVALID_PROP;
 
 		if (!decal_info[GPU_TEMP].enable ||
 			!_NV(nvmlDeviceGetTemperature(g->h, NVML_TEMP_GPU, &(g->temp))))
@@ -195,6 +202,11 @@ static gboolean get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 			res = g->clock != INVALID_PROP;
 			break;
 
+		case GPU_MEMCLOCK:
+			snprintf(buf, buf_size, "%uMHz", g->memclock);
+			res = g->clock != INVALID_PROP;
+			break;
+
 		case GPU_TEMP:
 			snprintf(buf, buf_size, "%.01fC", (float)(g->temp));
 			res = g->temp != INVALID_PROP;
@@ -206,7 +218,7 @@ static gboolean get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 			break;
 
 		case GPU_POWER:
-			snprintf(buf, buf_size, "%.02fW", (g->pwr) * 0.001f);
+			snprintf(buf, buf_size, "%uW", g->pwr / 1000);
 			res = g->pwr != INVALID_PROP;
 			break;
 
