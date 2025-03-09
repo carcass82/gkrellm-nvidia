@@ -33,8 +33,7 @@
 
 void shutdown_gpulib(GKNVMLLib *lib)
 {
-	if (is_valid_gpulib(lib) && lib->nvmlShutdown)
-	{
+	if (is_valid_gpulib(lib) && lib->nvmlShutdown) {
 		lib->nvmlShutdown();
 		dlclose(lib->handle);
 		
@@ -72,8 +71,7 @@ boolean initialize_gpulib(GKNVMLLib *lib)
 	if (lib && is_valid_gpulib_path(lib->path)) {
 		
 		lib->handle = dlopen(lib->path, RTLD_LAZY);
-		if (lib->handle)
-		{
+		if (lib->handle) {
 
 #define BIND_FUNCTION(fun) fun = (fun ## _fn)dlsym(lib->handle, #fun)
 

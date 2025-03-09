@@ -436,7 +436,7 @@ static void create_nv_panel(gint first_create)
 	gkrellm_panel_configure(plugin.panel,
 	                        NULL,
 	                        gkrellm_meter_style(plugin.style_id));
-	
+
 	gkrellm_panel_create(plugin.main_vbox, plugin.monitor, plugin.panel);
 
 	if (first_create) {
@@ -494,27 +494,26 @@ static void cb_toggle(GtkWidget *button, gpointer data)
 	rebuild_nv_panel();
 }
 
-static void cb_pathchanged(GtkWidget *widget, gpointer data)
+static void gkrellm_gtk_entry_set_icon(GtkWidget *widget, gboolean ok)
 {
-	UNUSED(data);
-
 	static const char *ICON_OK = "gtk-yes";
 	static const char *ICON_KO = "gtk-no";
 
+	gtk_entry_set_icon_from_icon_name(GTK_ENTRY(widget),
+	                                  GTK_ENTRY_ICON_SECONDARY,
+	                                  ok? ICON_OK : ICON_KO);
+}
+
+static void cb_pathchanged(GtkWidget *widget, gpointer data)
+{
+	UNUSED(data);
 	gchar *text = NULL;
 	gboolean valid_path = FALSE;
-	GIcon* valid_icon = NULL;
 
 	gkrellm_dup_string(&text, gkrellm_gtk_entry_get_text(&widget));
 
 	valid_path = is_valid_gpulib_path(text);
-	valid_icon = g_themed_icon_new(valid_path? ICON_OK : ICON_KO);
-
-	gtk_entry_set_icon_from_gicon(GTK_ENTRY(widget),
-	                              GTK_ENTRY_ICON_SECONDARY,
-	                              valid_icon);
-
-	g_object_unref(valid_icon);
+	gkrellm_gtk_entry_set_icon(widget, valid_path);
 
 	reset_lib = valid_path;
 	if (valid_path)
@@ -552,22 +551,22 @@ gkrellm_gtk_entry_connected(GtkWidget *box, GtkWidget **entry, gchar *text,
 		g_signal_connect(G_OBJECT(e), "changed", G_CALLBACK(cb_func), data);
 	
 	if (entry)
-		*entry = h;
+		*entry = e;
 }
 
 static void create_plugin_tab(GtkWidget *tab_vbox)
 {
 	int i;
-	GtkWidget *tabs, *vbox, *cntvbox;
+	GtkWidget *tabs, *vbox, *cntvbox, *nvml_entry;
 	
 	tabs = gtk_notebook_new();
 	gtk_notebook_set_tab_pos(GTK_NOTEBOOK(tabs), GTK_POS_TOP);
 	gtk_box_pack_start(GTK_BOX(tab_vbox), tabs, TRUE, TRUE, 0);
 
 	vbox = gkrellm_gtk_framed_notebook_page(tabs, _(" Options "));
-	
+
 	gkrellm_gtk_entry_connected(vbox,
-	                            NULL,
+	                            &nvml_entry,
 	                            nvml.path,
 	                            FALSE,
 	                            FALSE,
@@ -575,6 +574,8 @@ static void create_plugin_tab(GtkWidget *tab_vbox)
 	                            cb_pathchanged,
 	                            NULL,
 	                            _("libNVML path"));
+
+	gkrellm_gtk_entry_set_icon(nvml_entry, is_valid_gpulib_path(nvml.path));
 
 	cntvbox = gkrellm_gtk_framed_vbox(vbox, _(" Counters "), 2, TRUE, 4, 4);
 
