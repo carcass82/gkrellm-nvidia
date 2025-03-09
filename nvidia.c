@@ -47,7 +47,7 @@ static gboolean reset_lib = FALSE;
 /* mark unused variables to avoid compile warnings */
 #define UNUSED(x) (void)(x)
 
-/* mark unused variables to avoid compile warnings */
+/* helper to keep struct size consistent with enum */
 #define ASSERT_SIZE(st, size) \
 	typedef char st ## _size[(sizeof(st) / sizeof(st[0]) == size) - 1];
 
