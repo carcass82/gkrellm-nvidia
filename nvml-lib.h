@@ -26,20 +26,29 @@ typedef enum { NVML_SUCCESS, NVML_ERROR_UNKNOWN = 999 } nvmlReturn_t;
 typedef enum { NVML_CLOCK_GFX, NVML_CLOCK_MEM = 2 } nvmlClockType_t;
 typedef enum { NVML_TEMP_GPU } nvmlSensors_t;
 
+#define NVML_API_VERSION(name, ver) (uint)(sizeof(name) | (ver << 24u))
+
 typedef void* nvmlDevice_t;
 
-typedef struct nvmlMemory_st {
+typedef struct {
 	uint64 total;
 	uint64 free;
 	uint64 used;
 } nvmlMemory_t;
 
-typedef struct nvmlUsage_st {
+typedef struct {
 	uint gpu;
 	uint memory;
 } nvmlUsage_t;
 
-typedef struct nvmlPciInfo_st {
+typedef struct {
+    uint version;
+	uint fanidx;
+    uint speed;
+} nvmlFan_t;
+#define nvmlFan_ver NVML_API_VERSION(nvmlFan_t, 1)
+
+typedef struct {
 	char busId[16];
 	uint unused[9];
 } nvmlPciInfo_t;
@@ -57,9 +66,11 @@ DECLARE_FUNCTION(nvmlDeviceGetPowerUsage, nvmlDevice_t, uint*);
 DECLARE_FUNCTION(nvmlDeviceGetUtilizationRates, nvmlDevice_t, nvmlUsage_t*);
 DECLARE_FUNCTION(nvmlDeviceGetMemoryInfo, nvmlDevice_t, nvmlMemory_t*);
 DECLARE_FUNCTION(nvmlDeviceGetPciInfo, nvmlDevice_t, nvmlPciInfo_t*);
+DECLARE_FUNCTION(nvmlDeviceGetNumFans, nvmlDevice_t, uint*);
+DECLARE_FUNCTION(nvmlDeviceGetFanSpeedRPM, nvmlDevice_t, nvmlFan_t*);
 #undef DECLARE_FUNCTION
 
-typedef struct _GKNVMLLib {
+typedef struct {
 	char path[512];
 	void *handle;
 	boolean valid;
@@ -76,6 +87,8 @@ typedef struct _GKNVMLLib {
 	nvmlDeviceGetUtilizationRates_fn nvmlDeviceGetUtilizationRates;
 	nvmlDeviceGetMemoryInfo_fn nvmlDeviceGetMemoryInfo;
 	nvmlDeviceGetPciInfo_fn nvmlDeviceGetPciInfo;
+	nvmlDeviceGetNumFans_fn nvmlDeviceGetNumFans;
+	nvmlDeviceGetFanSpeedRPM_fn nvmlDeviceGetFanSpeedRPM;
 } GKNVMLLib;
 
 boolean initialize_gpulib(GKNVMLLib *lib);

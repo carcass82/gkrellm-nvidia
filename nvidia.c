@@ -29,6 +29,7 @@
 #ifndef GK_MAX_GPUS
  #define GK_MAX_GPUS 4
 #endif
+#define GK_MAX_GPU_FANS 1
 
 static GKNVMLLib nvml;
 static gboolean reset_lib = FALSE;
@@ -41,10 +42,14 @@ static gboolean reset_lib = FALSE;
 #define _NV(fn) (nvml.fn == NVML_SUCCESS)
 
 /* convert bytes to mbytes */
-#define B2MB(b) (b / 1024 / 1024)
+#define B2MB(b) (b / 0x100000)
 
 /* mark unused variables to avoid compile warnings */
 #define UNUSED(x) (void)(x)
+
+/* mark unused variables to avoid compile warnings */
+#define ASSERT_SIZE(st, size) \
+	typedef char st ## _size[(sizeof(st) / sizeof(st[0]) == size) - 1];
 
 
 typedef struct _GKNvidia {
@@ -69,6 +74,7 @@ typedef enum _GPUProperty {
 	GPU_MEMCLOCK,
 	GPU_TEMP,
 	GPU_FAN,
+	GPU_FANUSAGE,
 	GPU_POWER,
 	GPU_MEMUSAGE,
 	GPU_USEDMEM,
@@ -85,17 +91,21 @@ typedef struct _GkrellmDecalRowInfo {
 } GkrellmDecalRowInfo_t;
 
 static GkrellmDecalRowInfo_t decal_info[] = {
-	{ TRUE, 0, CENTER, "",                ""                                },
-	{ TRUE, 1, RIGHT,  _("Load"),         _("GPU Load")                     },
-	{ TRUE, 2, RIGHT,  _("Clock"),        _("GPU Clock")                    },
-	{ TRUE, 3, RIGHT,  _("Memory Clock"), _("GPU Memory Clock")             },
-	{ TRUE, 4, RIGHT,  _("Temp"),         _("GPU Temperature")              },
-	{ TRUE, 5, RIGHT,  _("Fan"),          _("GPU Fan Speed")                },
-	{ TRUE, 6, RIGHT,  _("Power"),        _("GPU Power Draw")               },
-	{ TRUE, 7, RIGHT,  _("Used Memory"),  _("GPU Used Memory (percentage)") },
-	{ TRUE, 8, RIGHT,  _("Used Memory"),  _("GPU Used Memory")              },
-	{ TRUE, 9, RIGHT,  _("Total Memory"), _("GPU Total Memory")             } 
+	{ TRUE,  0, CENTER, "",                ""                                },
+	{ TRUE,  1, RIGHT,  _("Load"),         _("GPU Load")                     },
+	{ TRUE,  2, RIGHT,  _("Clock"),        _("GPU Clock")                    },
+	{ TRUE,  3, RIGHT,  _("Memory Clock"), _("GPU Memory Clock")             },
+	{ TRUE,  4, RIGHT,  _("Temp"),         _("GPU Temperature")              },
+	{ TRUE,  5, RIGHT,  _("Fan"),          _("GPU Fan Speed")                },
+	{ TRUE,  6, RIGHT,  _("Fan"),          _("GPU Fan Speed (percentage)")   },
+	{ TRUE,  7, RIGHT,  _("Power"),        _("GPU Power Draw")               },
+	{ TRUE,  8, RIGHT,  _("Used Memory"),  _("GPU Used Memory (percentage)") },
+	{ TRUE,  9, RIGHT,  _("Used Memory"),  _("GPU Used Memory")              },
+	{ TRUE, 10, RIGHT,  _("Total Memory"), _("GPU Total Memory")             } 
 };
+
+/* make sure this stays consistent with gpu properties */
+ASSERT_SIZE(decal_info, GPU_PROPS_NUM);
 
 typedef struct _GkrellmDecalRow {
 	GkrellmDecal *label;
@@ -104,10 +114,10 @@ typedef struct _GkrellmDecalRow {
 
 static GkrellmDecalRow_t decal_text[GK_MAX_GPUS * GPU_PROPS_NUM];
 
-#define INVALID_PROP -1u;
+#define INVALID_PROP -1u
 
 typedef struct _NVGpuInfo {
-	gboolean enable;
+	gboolean good;
 	char name[GK_MAX_TEXT];
 	nvmlDevice_t h;
 	nvmlPciInfo_t pci;
@@ -118,23 +128,36 @@ typedef struct _NVGpuInfo {
 	guint pwr;
 	nvmlUsage_t usage;
 	nvmlMemory_t memory;
+	guint fan_count;
+	nvmlFan_t fan_data[GK_MAX_GPU_FANS];
 } NVGpuInfo;
 
 static NVGpuInfo gpu_info[GK_MAX_GPUS];
 
 static void update_gpu_info(void)
 {
-	guint i, gpu_count;
+	guint i, gpu_count, f;
 	NVGpuInfo *g;
+
+	memset(gpu_info, 0, sizeof(NVGpuInfo) * GK_MAX_GPUS);
 
 	if (_NV(nvmlDeviceGetCount(&gpu_count)))
 		if (CLAMP(gpu_count, 0, GK_MAX_GPUS) > 0)
 			for (i = 0; i < gpu_count; ++i) {
 				g = &gpu_info[i];
-				g->enable =
-				    _NV(nvmlDeviceGetHandleByIndex(i, &(g->h))) &&
-				    _NV(nvmlDeviceGetName(g->h, g->name, GK_MAX_TEXT)) &&
-				    _NV(nvmlDeviceGetPciInfo(g->h, &(g->pci)));
+				g->good = _NV(nvmlDeviceGetHandleByIndex(i, &(g->h)))        &&
+				          _NV(nvmlDeviceGetName(g->h, g->name, GK_MAX_TEXT)) &&
+				          _NV(nvmlDeviceGetPciInfo(g->h, &(g->pci)));
+
+				if (_NV(nvmlDeviceGetNumFans(g->h, &(g->fan_count)))) 
+					g->fan_count = CLAMP(g->fan_count, 0, GK_MAX_GPU_FANS);
+				else
+					g->fan_count = 0;
+
+				for (f = 0; f < g->fan_count; ++f) {
+					g->fan_data[f].version = nvmlFan_ver;
+					g->fan_data[f].fanidx = f;
+				}
 			}
 }
 
@@ -147,7 +170,7 @@ static void update_gpu_data(void)
 		
 		g = &gpu_info[i];
 		
-		if (!g->enable)
+		if (!g->good)
 			continue;
 
 		if (!decal_info[GPU_CLOCK].enable ||
@@ -162,9 +185,13 @@ static void update_gpu_data(void)
 			!_NV(nvmlDeviceGetTemperature(g->h, NVML_TEMP_GPU, &(g->temp))))
 			g->temp = INVALID_PROP;
 
-		if (!decal_info[GPU_FAN].enable ||
+		if (!decal_info[GPU_FANUSAGE].enable ||
 			!_NV(nvmlDeviceGetFanSpeed(g->h, &(g->fan))))
 			g->fan = INVALID_PROP;
+
+		if (!decal_info[GPU_FAN].enable ||
+			!_NV(nvmlDeviceGetFanSpeedRPM(g->h, &(g->fan_data[0]))))
+			g->fan_data[0].speed = INVALID_PROP;
 
 		if (!decal_info[GPU_POWER].enable ||
 			!_NV(nvmlDeviceGetPowerUsage(g->h, &(g->pwr))))
@@ -187,7 +214,7 @@ static gboolean get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 	gboolean res = FALSE;
 	NVGpuInfo *g;
 
-	if (gpu_info[gpu_id].enable) {
+	if (gpu_info[gpu_id].good) {
 
 		g = &gpu_info[gpu_id];
 
@@ -212,9 +239,14 @@ static gboolean get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 			res = g->temp != INVALID_PROP;
 			break;
 
-		case GPU_FAN:
+		case GPU_FANUSAGE:
 			snprintf(buf, buf_size, "%u%%", CLAMP(g->fan, 0u, 100u));
 			res = g->fan != INVALID_PROP;
+			break;
+
+		case GPU_FAN:
+			snprintf(buf, buf_size, "%uRPM", g->fan_data[0].speed);
+			res = g->fan_count > 0 && g->fan_data[0].speed != INVALID_PROP;
 			break;
 
 		case GPU_POWER:
@@ -292,7 +324,7 @@ static void update_plugin(void)
 
 	for (i = 0; i < GK_MAX_GPUS; ++i) {
 
-		if (gpu_info[i].enable == FALSE)
+		if (!gpu_info[i].good)
 			continue;
 
 		idx = i * GPU_PROPS_NUM;
@@ -374,7 +406,7 @@ static void populate_panel(void)
 	
 	for (y = -1, i = 0; i < GK_MAX_GPUS; ++i) {
 
-		if (gpu_info[i].enable == FALSE)
+		if (!gpu_info[i].good)
 			continue;
 
 		for (j = GPU_NAME; j < GPU_PROPS_NUM; ++j) {
@@ -431,7 +463,7 @@ static void shutdown_plugin()
 	int i;
 
 	for (i = 0; i < GK_MAX_GPUS; ++i)
-		gpu_info[i].enable = FALSE;
+		gpu_info[i].good = FALSE;
 
 	shutdown_gpulib(&nvml);
 }
@@ -616,7 +648,7 @@ static void load_plugin_config(gchar *arg)
 			decal_info[i].enable = TRUE;
 
 		for (i = 0; i < GK_MAX_GPUS; ++i)
-			gpu_info[i].enable = FALSE;
+			gpu_info[i].good = FALSE;
 	}
 }
 
