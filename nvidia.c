@@ -602,49 +602,40 @@ static void apply_plugin_config(void)
 
 static void save_plugin_config(FILE *f)
 {
-	fprintf(f, "%s NVML %d %d %d %d %d %d %d %d %s\n",
-	                                           GK_CONFIG_KEYWORD,
-	                                           decal_info[GPU_CLOCK].enable,
-	                                           decal_info[GPU_TEMP].enable,
-	                                           decal_info[GPU_FAN].enable,
-	                                           decal_info[GPU_POWER].enable,
-	                                           decal_info[GPU_USAGE].enable,
-	                                           decal_info[GPU_MEMUSAGE].enable,
-	                                           decal_info[GPU_USEDMEM].enable,
-	                                           decal_info[GPU_TOTALMEM].enable,
-	                                           nvml.path);
-}
+	guint i, config_mask = 0;
 
+	for (i = 0; i < GPU_PROPS_NUM; ++i)
+		config_mask |= (decal_info[i].enable? 1 : 0) << i;
+
+	fprintf(f, "%s NVML %u %s\n", GK_CONFIG_KEYWORD, config_mask, nvml.path);
+}
 
 static void load_plugin_config(gchar *arg)
 {
 	gchar config_key[16];
 	gchar config_line[GK_MAX_PATH];
 	gboolean read_config_ok = FALSE;
-	int i;
+	guint i, prop_mask, config_mask;
 
 	if (sscanf(arg, "%15s %511[^\n]", config_key, config_line) == 2) {
 	
 		if (!strcmp(config_key, "NVML"))
-			if (sscanf(config_line, "%d %d %d %d %d %d %d %d %511s",
-			                                  &decal_info[GPU_CLOCK].enable,
-			                                  &decal_info[GPU_TEMP].enable,
-			                                  &decal_info[GPU_FAN].enable,
-			                                  &decal_info[GPU_POWER].enable,
-			                                  &decal_info[GPU_USAGE].enable,
-			                                  &decal_info[GPU_MEMUSAGE].enable,
-			                                  &decal_info[GPU_USEDMEM].enable,
-			                                  &decal_info[GPU_TOTALMEM].enable,
-			                                  nvml.path) == 9)
-
+			if (sscanf(config_line, "%u %511s", &config_mask, nvml.path) == 2)
 				read_config_ok = is_valid_gpulib_path(nvml.path);
-
 	}
 
-	if (!read_config_ok) {
+	if (read_config_ok) {
+	
+		for (i = 0; i < GPU_PROPS_NUM; ++i) {
+			prop_mask = 1u << i;
+			decal_info[i].enable = ((config_mask & prop_mask) == prop_mask);
+		}
+	
+	} else {
+	
 		strcpy(nvml.path, GKFREQ_NVML_SONAME);
 
-		for (i = GPU_NAME; i < GPU_PROPS_NUM; ++i)
+		for (i = 0; i < GPU_PROPS_NUM; ++i)
 			decal_info[i].enable = TRUE;
 
 		for (i = 0; i < GK_MAX_GPUS; ++i)
