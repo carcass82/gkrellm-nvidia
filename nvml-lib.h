@@ -42,9 +42,9 @@ typedef struct {
 } nvmlUsage_t;
 
 typedef struct {
-    uint version;
+	uint version;
 	uint fanidx;
-    uint speed;
+	uint speed;
 } nvmlFan_t;
 #define nvmlFan_ver NVML_API_VERSION(nvmlFan_t, 1)
 

@@ -38,6 +38,10 @@ static gboolean reset_lib = FALSE;
  #define GKFREQ_NVML_SONAME "libnvidia-ml.so"
 #endif
 
+#ifndef GDK_BUTTON_SECONDARY
+ #define GDK_BUTTON_SECONDARY 3
+#endif
+
 /* convert nvml return to boolean */
 #define _NV(fn) (nvml.fn == NVML_SUCCESS)
 
@@ -47,10 +51,17 @@ static gboolean reset_lib = FALSE;
 /* mark unused variables to avoid compile warnings */
 #define UNUSED(x) (void)(x)
 
-/* helper to keep struct size consistent with enum */
-#define ASSERT_SIZE(st, size) \
-	typedef char st ## _size[(sizeof(st) / sizeof(st[0]) == size) - 1];
+/* helper for array length */
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
 
+/* helper to keep struct size consistent with enum */
+#define ASSERT_SIZE(a, sz) typedef char a ## _sz[(ARRAY_SIZE(a) == sz) - 1]
+
+#define GKSWAP(x, y) do { \
+	typeof(x) _tmp = x;   \
+	x = y;                \
+	y = _tmp;             \
+} while(0)
 
 typedef struct _GKNvidia {
 	GtkWidget *main_vbox;
@@ -134,6 +145,26 @@ typedef struct _NVGpuInfo {
 
 static NVGpuInfo gpu_info[GK_MAX_GPUS];
 
+static gboolean is_decal_enabled(GPUProperty_t prop)
+{
+	int i;
+
+	for (i = 0; i < GPU_PROPS_NUM; ++i)
+		if (decal_info[i].order == prop)
+			return decal_info[i].enable;
+
+	return FALSE;
+}
+
+static void set_decal_enabled(GPUProperty_t prop, gboolean toggle)
+{
+	int i;
+
+	for (i = 0; i < GPU_PROPS_NUM; ++i)
+		if (decal_info[i].order == prop)
+			decal_info[i].enable = toggle;
+}
+
 static void update_gpu_info(void)
 {
 	guint i, gpu_count, f;
@@ -173,37 +204,37 @@ static void update_gpu_data(void)
 		if (!g->good)
 			continue;
 
-		if (!decal_info[GPU_CLOCK].enable ||
+		if (!is_decal_enabled(GPU_CLOCK) ||
 			!_NV(nvmlDeviceGetClockInfo(g->h, NVML_CLOCK_GFX, &(g->clock))))
 			g->clock = INVALID_PROP;
 
-		if (!decal_info[GPU_CLOCK].enable ||
+		if (!is_decal_enabled(GPU_MEMCLOCK) ||
 			!_NV(nvmlDeviceGetClockInfo(g->h, NVML_CLOCK_MEM, &(g->memclock))))
 			g->memclock = INVALID_PROP;
 
-		if (!decal_info[GPU_TEMP].enable ||
+		if (!is_decal_enabled(GPU_TEMP) ||
 			!_NV(nvmlDeviceGetTemperature(g->h, NVML_TEMP_GPU, &(g->temp))))
 			g->temp = INVALID_PROP;
 
-		if (!decal_info[GPU_FANUSAGE].enable ||
+		if (!is_decal_enabled(GPU_FANUSAGE) ||
 			!_NV(nvmlDeviceGetFanSpeed(g->h, &(g->fan))))
 			g->fan = INVALID_PROP;
 
-		if (!decal_info[GPU_FAN].enable ||
+		if (!is_decal_enabled(GPU_FAN) ||
 			!_NV(nvmlDeviceGetFanSpeedRPM(g->h, &(g->fan_data[0]))))
 			g->fan_data[0].speed = INVALID_PROP;
 
-		if (!decal_info[GPU_POWER].enable ||
+		if (!is_decal_enabled(GPU_POWER) ||
 			!_NV(nvmlDeviceGetPowerUsage(g->h, &(g->pwr))))
 			g->pwr = INVALID_PROP;
 
-		if ((!decal_info[GPU_USAGE].enable &&
-			 !decal_info[GPU_MEMUSAGE].enable) ||
+		if ((!is_decal_enabled(GPU_USAGE) &&
+			 !is_decal_enabled(GPU_MEMUSAGE)) ||
 			!_NV(nvmlDeviceGetUtilizationRates(g->h, &(g->usage))))
 			g->usage.gpu = g->usage.memory = INVALID_PROP;
 
-		if ((!decal_info[GPU_USEDMEM].enable &&
-			 !decal_info[GPU_TOTALMEM].enable) ||
+		if ((!is_decal_enabled(GPU_USEDMEM) &&
+			 !is_decal_enabled(GPU_TOTALMEM)) ||
 			!_NV(nvmlDeviceGetMemoryInfo(g->h, &(g->memory))))
 			g->memory.free = g->memory.total = g->memory.used = INVALID_PROP;
 	}
@@ -231,7 +262,7 @@ static gboolean get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 
 		case GPU_MEMCLOCK:
 			snprintf(buf, buf_size, "%uMHz", g->memclock);
-			res = g->clock != INVALID_PROP;
+			res = g->memclock != INVALID_PROP;
 			break;
 
 		case GPU_TEMP:
@@ -307,7 +338,7 @@ static void panel_click_event(GtkWidget *w, GdkEventButton *event, gpointer p)
 	UNUSED(w);
 	UNUSED(p);
 
-	if (event->button == 3)
+	if (event->button == GDK_BUTTON_SECONDARY)
 		gkrellm_open_config_window(plugin.monitor);
 }
 
@@ -317,7 +348,7 @@ static void update_plugin(void)
 	GkrellmMargin *m = gkrellm_get_style_margins(style);
 	GkrellmDecal *d;
 	int w = gkrellm_chart_width();
-	int w_text, i, p, idx;
+	int w_text, i, p, idx, p_idx;
 	static char temp_string[GK_MAX_TEXT] = "N/A";
 
 	update_gpu_data();
@@ -331,7 +362,9 @@ static void update_plugin(void)
 
 		for (p = 0; p < GPU_PROPS_NUM; ++p) {
 
-			d = decal_text[idx + p].label;
+			p_idx = decal_info[p].order;
+
+			d = decal_text[idx + p_idx].label;
 
 			if (decal_info[p].enable && d != NULL) {
 
@@ -340,29 +373,29 @@ static void update_plugin(void)
 				                        decal_info[p].label,
 				                        0);
 
-				get_gpu_data(i, p, temp_string, GK_MAX_TEXT);
+				get_gpu_data(i, p_idx, temp_string, GK_MAX_TEXT);
 				
 				w_text = gkrellm_gdk_string_width(d->text_style.font,
 				                                  temp_string);
 
 				switch (decal_info[p].alignment) {
 				case LEFT:
-					decal_text[idx + p].data->x = m->left;
+					decal_text[idx + p_idx].data->x = m->left;
 					break;
 				case CENTER:
-					decal_text[idx + p].data->x = (w - w_text) / 2 - 1;
+					decal_text[idx + p_idx].data->x = (w - w_text) / 2 - 1;
 					break;
 				case RIGHT:
-					decal_text[idx + p].data->x = w -
-					                              m->left -
-					                              m->right -
-					                              w_text -
-					                              1;
+					decal_text[idx + p_idx].data->x = w -
+					                                  m->left -
+					                                  m->right -
+					                                  w_text -
+					                                  1;
 					break;
 				}
 
 				gkrellm_draw_decal_text(plugin.panel,
-				                        decal_text[idx + p].data,
+				                        decal_text[idx + p_idx].data,
 				                        temp_string,
 				                        0);
 			}
@@ -373,8 +406,11 @@ static void update_plugin(void)
 	gkrellm_draw_panel_layers(plugin.panel);
 }
 
-static int
-create_decal_row(int i, GPUProperty_t offset, gchar *label, gchar *text, int y)
+static int create_decal_row(int i,
+                            GPUProperty_t offset,
+                            gchar *label,
+                            gchar *text,
+                            int y)
 {
 	GkrellmStyle *style = gkrellm_meter_style(plugin.style_id);
 	GkrellmTextstyle *ts = gkrellm_meter_textstyle(plugin.style_id);
@@ -402,7 +438,9 @@ create_decal_row(int i, GPUProperty_t offset, gchar *label, gchar *text, int y)
 
 static void populate_panel(void)
 {
-	int i, j, y;
+	int i, j, y, p;
+	char* l;
+	static char SIZE_STRING[] = "WWWWWWWW";
 	
 	for (y = -1, i = 0; i < GK_MAX_GPUS; ++i) {
 
@@ -412,7 +450,9 @@ static void populate_panel(void)
 		for (j = GPU_NAME; j < GPU_PROPS_NUM; ++j) {
 
 			if (decal_info[j].enable) {
-				y = create_decal_row(i, j, decal_info[j].label, "8888888", y);
+				p = decal_info[j].order;
+				l = decal_info[j].label;
+				y = create_decal_row(i, p, l, SIZE_STRING, y);
 				y += ((j == GPU_NAME)? 5 : 1);
 			}
 
@@ -420,7 +460,7 @@ static void populate_panel(void)
 	}
 }
 
-static void destroy_nv_panel()
+static void destroy_nv_panel(void)
 {
 	gkrellm_panel_destroy(plugin.panel);
 	plugin.panel = NULL;
@@ -452,13 +492,13 @@ static void create_nv_panel(gint first_create)
 	}
 }
 
-static void rebuild_nv_panel()
+static void rebuild_nv_panel(void)
 {
 	destroy_nv_panel();
 	create_nv_panel(TRUE);
 }
 
-static void shutdown_plugin()
+static void shutdown_plugin(void)
 {
 	int i;
 
@@ -487,9 +527,7 @@ static void create_plugin(GtkWidget* vbox, gint first_create)
 static void cb_toggle(GtkWidget *button, gpointer data)
 {
 	gboolean active = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(button));
-
-	if (data != NULL)
-		*(gboolean*)data = active;
+	set_decal_enabled(GPOINTER_TO_INT(data), active);
 
 	rebuild_nv_panel();
 }
@@ -525,10 +563,15 @@ static void cb_pathchanged(GtkWidget *widget, gpointer data)
  * gkrellm_gtk_check_button_connected or gkrellm_gtk_button_connected
  * found in gkrellm src/gui.c
  */
-static void
-gkrellm_gtk_entry_connected(GtkWidget *box, GtkWidget **entry, gchar *text,
-                            gboolean expand, gboolean fill, gint pad,
-                            void (*cb_func)(), gpointer data, gchar *label)
+static void gkrellm_gtk_entry_connected(GtkWidget *box,
+                                        GtkWidget **entry,
+                                        gchar *text,
+                                        gboolean expand,
+                                        gboolean fill,
+                                        gint pad,
+                                        void (*cb_func)(),
+                                        gpointer data,
+                                        gchar *label)
 {
 	GtkWidget *l = gtk_label_new(label);
 	GtkWidget *e = gtk_entry_new_with_max_length(GK_MAX_PATH);
@@ -554,11 +597,77 @@ gkrellm_gtk_entry_connected(GtkWidget *box, GtkWidget **entry, gchar *text,
 		*entry = e;
 }
 
+static void cb_drag_data_get(GtkWidget        *widget,
+                             GdkDragContext   *context,
+                             GtkSelectionData *selection_data,
+                             guint             info,
+                             guint             time,
+                             gpointer          data)
+{
+	UNUSED(context);
+	UNUSED(info);
+	UNUSED(time);
+	UNUSED(data);
+
+	gtk_selection_data_set(selection_data,
+	                       gtk_selection_data_get_target(selection_data),
+	                       CHAR_BIT,
+	                       (const guchar*)&widget,
+	                       sizeof(gpointer));
+
+}
+
+static void cb_drag_data_received(GtkWidget        *widget,
+                                  GdkDragContext   *context,
+                                  gint              x,
+                                  gint              y,
+                                  GtkSelectionData *selection_data,
+                                  guint             info,
+                                  guint32           time,
+                                  gpointer          data)
+{
+	UNUSED(context);
+	UNUSED(x);
+	UNUSED(y);
+	UNUSED(info);
+	UNUSED(time);
+	UNUSED(data);
+	GtkWidget *target, *source, *container;
+	GList *children;
+	int source_pos, target_pos;
+
+	target = widget;
+	source = *(gpointer*)gtk_selection_data_get_data(selection_data);
+	container = gtk_widget_get_ancestor(source, GTK_TYPE_BOX);
+
+	children = gtk_container_get_children(GTK_CONTAINER(container));
+	source_pos = g_list_index(children, source);
+	target_pos = g_list_index(children, target);
+
+	if (source_pos > -1 && source_pos < GPU_PROPS_NUM - 1) {
+		gtk_box_reorder_child(GTK_BOX(container),
+		                      source,
+		                      target_pos);
+
+		gtk_box_reorder_child(GTK_BOX(container),
+		                      target,
+		                      source_pos);
+
+		GKSWAP(decal_info[source_pos + 1], decal_info[target_pos + 1]);
+
+		rebuild_nv_panel();
+	}
+}
+
 static void create_plugin_tab(GtkWidget *tab_vbox)
 {
 	int i;
-	GtkWidget *tabs, *vbox, *cntvbox, *nvml_entry;
+	GtkWidget *tabs, *vbox, *cntvbox, *nvml_entry, *button;
 	
+	static GtkTargetEntry dnd_entry[] = {
+	 { "GkrellmNvidiaOption", GTK_TARGET_SAME_APP, 0 }
+	};
+
 	tabs = gtk_notebook_new();
 	gtk_notebook_set_tab_pos(GTK_NOTEBOOK(tabs), GTK_POS_TOP);
 	gtk_box_pack_start(GTK_BOX(tab_vbox), tabs, TRUE, TRUE, 0);
@@ -579,16 +688,39 @@ static void create_plugin_tab(GtkWidget *tab_vbox)
 
 	cntvbox = gkrellm_gtk_framed_vbox(vbox, _(" Counters "), 2, TRUE, 4, 4);
 
-	for (i = GPU_NAME + 1; i < GPU_PROPS_NUM; ++i)
+	for (i = GPU_NAME + 1; i < GPU_PROPS_NUM; ++i) {
 		gkrellm_gtk_check_button_connected(cntvbox,
-		                                   NULL,
+		                                   &button,
 		                                   decal_info[i].enable,
 		                                   FALSE,
 		                                   FALSE,
 		                                   0,
 		                                   cb_toggle,
-		                                   &decal_info[i].enable,
+		                                   GINT_TO_POINTER(decal_info[i].order),
 		                                   decal_info[i].optionlabel);
+
+ 		gtk_drag_source_set(button,
+		                    GDK_BUTTON1_MASK,
+		                    dnd_entry,
+		                    1,
+		                    GDK_ACTION_MOVE);
+
+		gtk_drag_dest_set(button,
+		                  GTK_DEST_DEFAULT_ALL,
+		                  dnd_entry,
+		                  1,
+		                  GDK_ACTION_MOVE);
+
+		g_signal_connect(button,
+		                 "drag-data-get",
+		                 G_CALLBACK(cb_drag_data_get),
+		                 NULL);
+
+		g_signal_connect(button,
+		                 "drag-data-received",
+		                 G_CALLBACK(cb_drag_data_received),
+		                 NULL);
+	}
 }
 
 static void apply_plugin_config(void)
@@ -604,36 +736,68 @@ static void apply_plugin_config(void)
 static void save_plugin_config(FILE *f)
 {
 	guint i, config_mask = 0;
+	static gchar config_order[GPU_PROPS_NUM + 1] = { '\0' };
 
-	for (i = 0; i < GPU_PROPS_NUM; ++i)
-		config_mask |= (decal_info[i].enable? 1 : 0) << i;
+	for (i = 0; i < GPU_PROPS_NUM; ++i) {
+		config_mask |= (is_decal_enabled(i)? 1 : 0) << i;
+		config_order[i] = 'a' + decal_info[i].order;
+	}
 
-	fprintf(f, "%s NVML %u %s\n", GK_CONFIG_KEYWORD, config_mask, nvml.path);
+	fprintf(f, "%s NVML %u %s %s\n", GK_CONFIG_KEYWORD,
+	                                 config_mask,
+	                                 config_order,
+	                                 nvml.path);
+}
+
+static gboolean is_valid_ordering(gchar* order_string)
+{
+	char c;
+
+	if (strlen(order_string) != GPU_PROPS_NUM)
+		return FALSE;
+
+	for (c = 'a'; c < 'a' + GPU_PROPS_NUM; ++c)
+		if (!strchr(order_string, c))
+			return FALSE;
+
+	return TRUE;
 }
 
 static void load_plugin_config(gchar *arg)
 {
-	gchar config_key[16];
+	gchar config_key[16], config_order[16];
 	gchar config_line[GK_MAX_PATH];
 	gboolean read_config_ok = FALSE;
-	guint i, prop_mask, config_mask;
-
+	guint i, prop_mask, config_mask, i_cfg, i_idx, j_idx;
+	
 	if (sscanf(arg, "%15s %511[^\n]", config_key, config_line) == 2) {
 	
 		if (!strcmp(config_key, "NVML"))
-			if (sscanf(config_line, "%u %511s", &config_mask, nvml.path) == 2)
-				read_config_ok = is_valid_gpulib_path(nvml.path);
+			if (sscanf(config_line, "%u %16s %511s", &config_mask,
+			                                         config_order,
+			                                         nvml.path) == 3)
+				read_config_ok = is_valid_ordering(config_order) &&
+				                 is_valid_gpulib_path(nvml.path);
 	}
 
 	if (read_config_ok) {
-	
+
 		for (i = 0; i < GPU_PROPS_NUM; ++i) {
 			prop_mask = 1u << i;
 			decal_info[i].enable = ((config_mask & prop_mask) == prop_mask);
 		}
-	
+
+		for (i = 0; i < GPU_PROPS_NUM; ++i) {
+			i_cfg = config_order[i] - 'a';
+			i_idx = decal_info[i].order;
+			if (i_idx != i_cfg) {
+				j_idx = strchr(config_order, 'a' + i_idx) - config_order;
+				GKSWAP(decal_info[i], decal_info[j_idx]);
+			}
+		}
+
 	} else {
-	
+
 		strcpy(nvml.path, GKFREQ_NVML_SONAME);
 
 		for (i = 0; i < GPU_PROPS_NUM; ++i)
