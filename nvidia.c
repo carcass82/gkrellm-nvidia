@@ -205,36 +205,34 @@ static void update_gpu_data(void)
 			continue;
 
 		if (!is_decal_enabled(GPU_CLOCK) ||
-			!_NV(nvmlDeviceGetClockInfo(g->h, NVML_CLOCK_GFX, &(g->clock))))
+		    !_NV(nvmlDeviceGetClockInfo(g->h, NVML_CLOCK_GFX, &(g->clock))))
 			g->clock = INVALID_PROP;
 
 		if (!is_decal_enabled(GPU_MEMCLOCK) ||
-			!_NV(nvmlDeviceGetClockInfo(g->h, NVML_CLOCK_MEM, &(g->memclock))))
+		    !_NV(nvmlDeviceGetClockInfo(g->h, NVML_CLOCK_MEM, &(g->memclock))))
 			g->memclock = INVALID_PROP;
 
 		if (!is_decal_enabled(GPU_TEMP) ||
-			!_NV(nvmlDeviceGetTemperature(g->h, NVML_TEMP_GPU, &(g->temp))))
+		    !_NV(nvmlDeviceGetTemperature(g->h, NVML_TEMP_GPU, &(g->temp))))
 			g->temp = INVALID_PROP;
 
 		if (!is_decal_enabled(GPU_FANUSAGE) ||
-			!_NV(nvmlDeviceGetFanSpeed(g->h, &(g->fan))))
+		    !_NV(nvmlDeviceGetFanSpeed(g->h, &(g->fan))))
 			g->fan = INVALID_PROP;
 
 		if (!is_decal_enabled(GPU_FAN) ||
-			!_NV(nvmlDeviceGetFanSpeedRPM(g->h, &(g->fan_data[0]))))
+		    !_NV(nvmlDeviceGetFanSpeedRPM(g->h, &(g->fan_data[0]))))
 			g->fan_data[0].speed = INVALID_PROP;
 
 		if (!is_decal_enabled(GPU_POWER) ||
-			!_NV(nvmlDeviceGetPowerUsage(g->h, &(g->pwr))))
+		    !_NV(nvmlDeviceGetPowerUsage(g->h, &(g->pwr))))
 			g->pwr = INVALID_PROP;
 
-		if ((!is_decal_enabled(GPU_USAGE) &&
-			 !is_decal_enabled(GPU_MEMUSAGE)) ||
-			!_NV(nvmlDeviceGetUtilizationRates(g->h, &(g->usage))))
+		if ((!is_decal_enabled(GPU_USAGE) && !is_decal_enabled(GPU_MEMUSAGE)) ||
+		    !_NV(nvmlDeviceGetUtilizationRates(g->h, &(g->usage))))
 			g->usage.gpu = g->usage.memory = INVALID_PROP;
 
-		if ((!is_decal_enabled(GPU_USEDMEM) &&
-			 !is_decal_enabled(GPU_TOTALMEM)) ||
+		if ((!is_decal_enabled(GPU_USEDMEM) && !is_decal_enabled(GPU_TOTALMEM)) ||
 			!_NV(nvmlDeviceGetMemoryInfo(g->h, &(g->memory))))
 			g->memory.free = g->memory.total = g->memory.used = INVALID_PROP;
 	}
