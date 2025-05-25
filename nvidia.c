@@ -678,7 +678,7 @@ static void create_plugin_tab(GtkWidget *tab_vbox)
 	                            FALSE,
 	                            FALSE,
 	                            0,
-	                            cb_pathchanged,
+	                            G_CALLBACK(cb_pathchanged),
 	                            NULL,
 	                            _("libNVML path"));
 
@@ -693,7 +693,7 @@ static void create_plugin_tab(GtkWidget *tab_vbox)
 		                                   FALSE,
 		                                   FALSE,
 		                                   0,
-		                                   cb_toggle,
+		                                   G_CALLBACK(cb_toggle),
 		                                   GINT_TO_POINTER(decal_info[i].order),
 		                                   decal_info[i].optionlabel);
 
