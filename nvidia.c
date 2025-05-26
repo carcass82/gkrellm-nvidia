@@ -771,7 +771,7 @@ static void load_plugin_config(gchar *arg)
 	if (sscanf(arg, "%15s %511[^\n]", config_key, config_line) == 2) {
 	
 		if (!strcmp(config_key, "NVML"))
-			if (sscanf(config_line, "%u %16s %511s", &config_mask,
+			if (sscanf(config_line, "%u %15s %511s", &config_mask,
 			                                         config_order,
 			                                         nvml.path) == 3)
 				read_config_ok = is_valid_ordering(config_order) &&
