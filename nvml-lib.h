@@ -27,14 +27,19 @@ typedef enum { NVML_CLOCK_GFX, NVML_CLOCK_MEM = 2 } nvmlClockType_t;
 typedef enum { NVML_TEMP_GPU } nvmlSensors_t;
 
 #define NVML_API_VERSION(name, ver) (uint)(sizeof(name) | (ver << 24u))
+#define NVML_STRUCT_VERSION(data, ver) (unsigned int)(sizeof(nvml ## data ## _v ## ver ## _t) | \
+                                                      (ver << 24U))
 
 typedef void* nvmlDevice_t;
 
-typedef struct {
-	uint64 total;
-	uint64 free;
-	uint64 used;
-} nvmlMemory_t;
+typedef struct
+{
+    uint   version;      //!< Structure format version (must be 2)
+    uint64 total;        //!< Total physical device memory (in bytes)
+    uint64 reserved;     //!< Device memory (in bytes) reserved for system use (driver or firmware)
+    uint64 free;         //!< Unallocated device memory (in bytes)
+    uint64 used;         //!< Allocated device memory (in bytes).
+} nvmlMemory_v2_t;
 
 typedef struct {
 	uint gpu;
@@ -64,7 +69,7 @@ DECLARE_FUNCTION(nvmlDeviceGetTemperature, nvmlDevice_t, nvmlSensors_t, uint*);
 DECLARE_FUNCTION(nvmlDeviceGetFanSpeed, nvmlDevice_t, uint*);
 DECLARE_FUNCTION(nvmlDeviceGetPowerUsage, nvmlDevice_t, uint*);
 DECLARE_FUNCTION(nvmlDeviceGetUtilizationRates, nvmlDevice_t, nvmlUsage_t*);
-DECLARE_FUNCTION(nvmlDeviceGetMemoryInfo, nvmlDevice_t, nvmlMemory_t*);
+DECLARE_FUNCTION(nvmlDeviceGetMemoryInfo_v2, nvmlDevice_t, nvmlMemory_v2_t*);
 DECLARE_FUNCTION(nvmlDeviceGetPciInfo, nvmlDevice_t, nvmlPciInfo_t*);
 DECLARE_FUNCTION(nvmlDeviceGetNumFans, nvmlDevice_t, uint*);
 DECLARE_FUNCTION(nvmlDeviceGetFanSpeedRPM, nvmlDevice_t, nvmlFan_t*);
@@ -85,7 +90,7 @@ typedef struct {
 	nvmlDeviceGetFanSpeed_fn nvmlDeviceGetFanSpeed;
 	nvmlDeviceGetPowerUsage_fn nvmlDeviceGetPowerUsage;
 	nvmlDeviceGetUtilizationRates_fn nvmlDeviceGetUtilizationRates;
-	nvmlDeviceGetMemoryInfo_fn nvmlDeviceGetMemoryInfo;
+	nvmlDeviceGetMemoryInfo_v2_fn nvmlDeviceGetMemoryInfo_v2;
 	nvmlDeviceGetPciInfo_fn nvmlDeviceGetPciInfo;
 	nvmlDeviceGetNumFans_fn nvmlDeviceGetNumFans;
 	nvmlDeviceGetFanSpeedRPM_fn nvmlDeviceGetFanSpeedRPM;
