@@ -89,6 +89,7 @@ typedef enum _GPUProperty {
 	GPU_POWER,
 	GPU_MEMUSAGE,
 	GPU_USEDMEM,
+	GPU_RESERVEDMEM,
 	GPU_TOTALMEM,
 	GPU_PROPS_NUM
 } GPUProperty_t;
@@ -102,17 +103,18 @@ typedef struct _GkrellmDecalRowInfo {
 } GkrellmDecalRowInfo_t;
 
 static GkrellmDecalRowInfo_t decal_info[] = {
-	{ TRUE,  0, CENTER, "",                ""                                },
-	{ TRUE,  1, RIGHT,  _("Load"),         _("GPU Load")                     },
-	{ TRUE,  2, RIGHT,  _("Clock"),        _("GPU Clock")                    },
-	{ TRUE,  3, RIGHT,  _("Memory Clock"), _("GPU Memory Clock")             },
-	{ TRUE,  4, RIGHT,  _("Temp"),         _("GPU Temperature")              },
-	{ TRUE,  5, RIGHT,  _("Fan"),          _("GPU Fan Speed")                },
-	{ TRUE,  6, RIGHT,  _("Fan"),          _("GPU Fan Speed (percentage)")   },
-	{ TRUE,  7, RIGHT,  _("Power"),        _("GPU Power Draw")               },
-	{ TRUE,  8, RIGHT,  _("Used Memory"),  _("GPU Used Memory (percentage)") },
-	{ TRUE,  9, RIGHT,  _("Used Memory"),  _("GPU Used Memory")              },
-	{ TRUE, 10, RIGHT,  _("Total Memory"), _("GPU Total Memory")             } 
+	{ TRUE,  0, CENTER, "",                   ""                                },
+	{ TRUE,  1, RIGHT,  _("Load"),            _("GPU Load")                     },
+	{ TRUE,  2, RIGHT,  _("Clock"),           _("GPU Clock")                    },
+	{ TRUE,  3, RIGHT,  _("Memory Clock"),    _("GPU Memory Clock")             },
+	{ TRUE,  4, RIGHT,  _("Temp"),            _("GPU Temperature")              },
+	{ TRUE,  5, RIGHT,  _("Fan"),             _("GPU Fan Speed")                },
+	{ TRUE,  6, RIGHT,  _("Fan"),             _("GPU Fan Speed (percentage)")   },
+	{ TRUE,  7, RIGHT,  _("Power"),           _("GPU Power Draw")               },
+	{ TRUE,  8, RIGHT,  _("Used Memory"),     _("GPU Used Memory (percentage)") },
+	{ TRUE,  9, RIGHT,  _("Used Memory"),     _("GPU Used Memory")              },
+	{ TRUE, 10, RIGHT,  _("Reserved Memory"), _("GPU Reserved Memory")          },
+	{ TRUE, 11, RIGHT,  _("Total Memory"),    _("GPU Total Memory")             } 
 };
 
 /* make sure this stays consistent with gpu properties */
@@ -138,7 +140,7 @@ typedef struct _NVGpuInfo {
 	guint fan;
 	guint pwr;
 	nvmlUsage_t usage;
-	nvmlMemory_t memory;
+	nvmlMemory_v2_t memory;
 	guint fan_count;
 	nvmlFan_t fan_data[GK_MAX_GPU_FANS];
 } NVGpuInfo;
@@ -232,9 +234,13 @@ static void update_gpu_data(void)
 		    !_NV(nvmlDeviceGetUtilizationRates(g->h, &(g->usage))))
 			g->usage.gpu = g->usage.memory = INVALID_PROP;
 
-		if ((!is_decal_enabled(GPU_USEDMEM) && !is_decal_enabled(GPU_TOTALMEM)) ||
-			!_NV(nvmlDeviceGetMemoryInfo(g->h, &(g->memory))))
-			g->memory.free = g->memory.total = g->memory.used = INVALID_PROP;
+		g->memory.version = NVML_STRUCT_VERSION(Memory, 2);
+
+		if ((!is_decal_enabled(GPU_USEDMEM) && 
+			 !is_decal_enabled(GPU_RESERVEDMEM) &&
+			 !is_decal_enabled(GPU_TOTALMEM)) ||
+			!_NV(nvmlDeviceGetMemoryInfo_v2(g->h, &(g->memory))))
+			g->memory.free = g->memory.reserved = g->memory.total = g->memory.used = INVALID_PROP;
 	}
 }
 
@@ -296,6 +302,11 @@ static gboolean get_gpu_data(int gpu_id, int info, char *buf, int buf_size)
 		case GPU_USEDMEM:
 			snprintf(buf, buf_size, "%lluMB", B2MB(g->memory.used));
 			res = g->memory.used != INVALID_PROP;
+			break;
+
+		case GPU_RESERVEDMEM:
+			snprintf(buf, buf_size, "%lluMB", B2MB(g->memory.reserved));
+			res = g->memory.reserved != INVALID_PROP;
 			break;
 
 		case GPU_TOTALMEM:
