@@ -58,7 +58,7 @@ static gboolean reset_lib = FALSE;
 #define ASSERT_SIZE(a, sz) typedef char a ## _sz[(ARRAY_SIZE(a) == sz) - 1]
 
 #define GKSWAP(x, y) do { \
-	typeof(x) _tmp = x;   \
+	__typeof__(x) _tmp = x;   \
 	x = y;                \
 	y = _tmp;             \
 } while(0)
@@ -689,7 +689,7 @@ static void create_plugin_tab(GtkWidget *tab_vbox)
 	                            FALSE,
 	                            FALSE,
 	                            0,
-	                            G_CALLBACK(cb_pathchanged),
+	                            cb_pathchanged,
 	                            NULL,
 	                            _("libNVML path"));
 
@@ -704,7 +704,7 @@ static void create_plugin_tab(GtkWidget *tab_vbox)
 		                                   FALSE,
 		                                   FALSE,
 		                                   0,
-		                                   G_CALLBACK(cb_toggle),
+		                                   cb_toggle,
 		                                   GINT_TO_POINTER(decal_info[i].order),
 		                                   decal_info[i].optionlabel);
 

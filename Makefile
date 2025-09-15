@@ -1,4 +1,9 @@
 CFLAGS += -O2 -fpic -Wall -Wextra $(shell pkg-config gkrellm --cflags)
+
+# stick to C17 to avoid callback parameters compile issues with C23
+# https://gcc.gnu.org/gcc-15/porting_to.html#c23-fn-decls-without-parameters
+CFLAGS += -std=c17
+
 LDFLAGS += -shared
 INSTALLFLAGS = -m755 -s
 
