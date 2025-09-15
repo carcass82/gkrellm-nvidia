@@ -82,7 +82,7 @@ boolean initialize_gpulib(GKNVMLLib *lib)
 			lib->BIND_FUNCTION(nvmlDeviceGetName);
 			lib->BIND_FUNCTION(nvmlDeviceGetClockInfo);
 			lib->BIND_FUNCTION(nvmlDeviceGetTemperature);
-			lib->BIND_FUNCTION(nvmlDeviceGetFanSpeed);
+			lib->BIND_FUNCTION(nvmlDeviceGetFanSpeed_v2);
 			lib->BIND_FUNCTION(nvmlDeviceGetPowerUsage);
 			lib->BIND_FUNCTION(nvmlDeviceGetUtilizationRates);
 			lib->BIND_FUNCTION(nvmlDeviceGetMemoryInfo_v2);

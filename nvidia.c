@@ -43,7 +43,7 @@ static gboolean reset_lib = FALSE;
 #endif
 
 /* convert nvml return to boolean */
-#define _NV(fn) (nvml.fn == NVML_SUCCESS)
+#define NVFN(fn) (nvml.fn == NVML_SUCCESS)
 
 /* convert bytes to mbytes */
 #define B2MB(b) (b / 0x100000)
@@ -103,18 +103,18 @@ typedef struct _GkrellmDecalRowInfo {
 } GkrellmDecalRowInfo_t;
 
 static GkrellmDecalRowInfo_t decal_info[] = {
-	{ TRUE,  0, CENTER, "",                   ""                                },
-	{ TRUE,  1, RIGHT,  _("Load"),            _("GPU Load")                     },
-	{ TRUE,  2, RIGHT,  _("Clock"),           _("GPU Clock")                    },
-	{ TRUE,  3, RIGHT,  _("Memory Clock"),    _("GPU Memory Clock")             },
-	{ TRUE,  4, RIGHT,  _("Temp"),            _("GPU Temperature")              },
-	{ TRUE,  5, RIGHT,  _("Fan"),             _("GPU Fan Speed")                },
-	{ TRUE,  6, RIGHT,  _("Fan"),             _("GPU Fan Speed (percentage)")   },
-	{ TRUE,  7, RIGHT,  _("Power"),           _("GPU Power Draw")               },
-	{ TRUE,  8, RIGHT,  _("Used Memory"),     _("GPU Used Memory (percentage)") },
-	{ TRUE,  9, RIGHT,  _("Used Memory"),     _("GPU Used Memory")              },
-	{ TRUE, 10, RIGHT,  _("Reserved Memory"), _("GPU Reserved Memory")          },
-	{ TRUE, 11, RIGHT,  _("Total Memory"),    _("GPU Total Memory")             } 
+ { TRUE,  0, CENTER, "",                   ""                                },
+ { TRUE,  1, RIGHT,  _("Load"),            _("GPU Load")                     },
+ { TRUE,  2, RIGHT,  _("Clock"),           _("GPU Clock")                    },
+ { TRUE,  3, RIGHT,  _("Memory Clock"),    _("GPU Memory Clock")             },
+ { TRUE,  4, RIGHT,  _("Temp"),            _("GPU Temperature")              },
+ { TRUE,  5, RIGHT,  _("Fan"),             _("GPU Fan Speed")                },
+ { TRUE,  6, RIGHT,  _("Fan"),             _("GPU Fan Speed (percentage)")   },
+ { TRUE,  7, RIGHT,  _("Power"),           _("GPU Power Draw")               },
+ { TRUE,  8, RIGHT,  _("Used Memory"),     _("GPU Used Memory (percentage)") },
+ { TRUE,  9, RIGHT,  _("Used Memory"),     _("GPU Used Memory")              },
+ { TRUE, 10, RIGHT,  _("Reserved Memory"), _("GPU Reserved Memory")          },
+ { TRUE, 11, RIGHT,  _("Total Memory"),    _("GPU Total Memory")             } 
 };
 
 /* make sure this stays consistent with gpu properties */
@@ -140,7 +140,7 @@ typedef struct _NVGpuInfo {
 	guint fan;
 	guint pwr;
 	nvmlUsage_t usage;
-	nvmlMemory_v2_t memory;
+	nvmlMemory_t memory;
 	guint fan_count;
 	nvmlFan_t fan_data[GK_MAX_GPU_FANS];
 } NVGpuInfo;
@@ -174,15 +174,17 @@ static void update_gpu_info(void)
 
 	memset(gpu_info, 0, sizeof(NVGpuInfo) * GK_MAX_GPUS);
 
-	if (_NV(nvmlDeviceGetCount(&gpu_count)))
+	if (NVFN(nvmlDeviceGetCount(&gpu_count)))
 		if (CLAMP(gpu_count, 0, GK_MAX_GPUS) > 0)
 			for (i = 0; i < gpu_count; ++i) {
 				g = &gpu_info[i];
-				g->good = _NV(nvmlDeviceGetHandleByIndex(i, &(g->h)))        &&
-				          _NV(nvmlDeviceGetName(g->h, g->name, GK_MAX_TEXT)) &&
-				          _NV(nvmlDeviceGetPciInfo(g->h, &(g->pci)));
+				g->good = NVFN(nvmlDeviceGetHandleByIndex(i, &(g->h)))        &&
+				          NVFN(nvmlDeviceGetName(g->h, g->name, GK_MAX_TEXT)) &&
+				          NVFN(nvmlDeviceGetPciInfo(g->h, &(g->pci)));
 
-				if (_NV(nvmlDeviceGetNumFans(g->h, &(g->fan_count)))) 
+				g->memory.version = nvmlMemory_ver;
+
+				if (NVFN(nvmlDeviceGetNumFans(g->h, &(g->fan_count)))) 
 					g->fan_count = CLAMP(g->fan_count, 0, GK_MAX_GPU_FANS);
 				else
 					g->fan_count = 0;
@@ -207,40 +209,41 @@ static void update_gpu_data(void)
 			continue;
 
 		if (!is_decal_enabled(GPU_CLOCK) ||
-		    !_NV(nvmlDeviceGetClockInfo(g->h, NVML_CLOCK_GFX, &(g->clock))))
+		    !NVFN(nvmlDeviceGetClockInfo(g->h, NVML_CLOCK_GFX, &(g->clock))))
 			g->clock = INVALID_PROP;
 
 		if (!is_decal_enabled(GPU_MEMCLOCK) ||
-		    !_NV(nvmlDeviceGetClockInfo(g->h, NVML_CLOCK_MEM, &(g->memclock))))
+		    !NVFN(nvmlDeviceGetClockInfo(g->h, NVML_CLOCK_MEM, &(g->memclock))))
 			g->memclock = INVALID_PROP;
 
 		if (!is_decal_enabled(GPU_TEMP) ||
-		    !_NV(nvmlDeviceGetTemperature(g->h, NVML_TEMP_GPU, &(g->temp))))
+		    !NVFN(nvmlDeviceGetTemperature(g->h, NVML_TEMP_GPU, &(g->temp))))
 			g->temp = INVALID_PROP;
 
 		if (!is_decal_enabled(GPU_FANUSAGE) ||
-		    !_NV(nvmlDeviceGetFanSpeed(g->h, &(g->fan))))
+		    !NVFN(nvmlDeviceGetFanSpeed_v2(g->h, 0, &(g->fan))))
 			g->fan = INVALID_PROP;
 
 		if (!is_decal_enabled(GPU_FAN) ||
-		    !_NV(nvmlDeviceGetFanSpeedRPM(g->h, &(g->fan_data[0]))))
+		    !NVFN(nvmlDeviceGetFanSpeedRPM(g->h, &(g->fan_data[0]))))
 			g->fan_data[0].speed = INVALID_PROP;
 
 		if (!is_decal_enabled(GPU_POWER) ||
-		    !_NV(nvmlDeviceGetPowerUsage(g->h, &(g->pwr))))
+		    !NVFN(nvmlDeviceGetPowerUsage(g->h, &(g->pwr))))
 			g->pwr = INVALID_PROP;
 
 		if ((!is_decal_enabled(GPU_USAGE) && !is_decal_enabled(GPU_MEMUSAGE)) ||
-		    !_NV(nvmlDeviceGetUtilizationRates(g->h, &(g->usage))))
+		    !NVFN(nvmlDeviceGetUtilizationRates(g->h, &(g->usage))))
 			g->usage.gpu = g->usage.memory = INVALID_PROP;
 
-		g->memory.version = NVML_STRUCT_VERSION(Memory, 2);
-
-		if ((!is_decal_enabled(GPU_USEDMEM) && 
-			 !is_decal_enabled(GPU_RESERVEDMEM) &&
-			 !is_decal_enabled(GPU_TOTALMEM)) ||
-			!_NV(nvmlDeviceGetMemoryInfo_v2(g->h, &(g->memory))))
-			g->memory.free = g->memory.reserved = g->memory.total = g->memory.used = INVALID_PROP;
+		if ((!is_decal_enabled(GPU_USEDMEM) &&
+		     !is_decal_enabled(GPU_RESERVEDMEM) &&
+		     !is_decal_enabled(GPU_TOTALMEM)) ||
+		     !NVFN(nvmlDeviceGetMemoryInfo_v2(g->h, &(g->memory))))
+			g->memory.free =
+			g->memory.reserved =
+			g->memory.total =
+			g->memory.used = INVALID_PROP;
 	}
 }
 
@@ -358,7 +361,7 @@ static void update_plugin(void)
 	GkrellmDecal *d;
 	int w = gkrellm_chart_width();
 	int w_text, i, p, idx, p_idx;
-	static char temp_string[GK_MAX_TEXT] = "N/A";
+	static char prop[GK_MAX_TEXT] = "N/A";
 
 	update_gpu_data();
 
@@ -382,10 +385,9 @@ static void update_plugin(void)
 				                        decal_info[p].label,
 				                        0);
 
-				get_gpu_data(i, p_idx, temp_string, GK_MAX_TEXT);
+				get_gpu_data(i, p_idx, prop, GK_MAX_TEXT);
 				
-				w_text = gkrellm_gdk_string_width(d->text_style.font,
-				                                  temp_string);
+				w_text = gkrellm_gdk_string_width(d->text_style.font, prop);
 
 				switch (decal_info[p].alignment) {
 				case LEFT:
@@ -405,7 +407,7 @@ static void update_plugin(void)
 
 				gkrellm_draw_decal_text(plugin.panel,
 				                        decal_text[idx + p_idx].data,
-				                        temp_string,
+				                        prop,
 				                        0);
 			}
 
