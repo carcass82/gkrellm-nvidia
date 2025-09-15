@@ -57,10 +57,10 @@ static gboolean reset_lib = FALSE;
 /* helper to keep struct size consistent with enum */
 #define ASSERT_SIZE(a, sz) typedef char a ## _sz[(ARRAY_SIZE(a) == sz) - 1]
 
-#define GKSWAP(x, y) do { \
+#define GKSWAP(x, y) do {     \
 	__typeof__(x) _tmp = x;   \
-	x = y;                \
-	y = _tmp;             \
+	x = y;                    \
+	y = _tmp;                 \
 } while(0)
 
 typedef struct _GKNvidia {
